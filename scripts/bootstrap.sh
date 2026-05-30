@@ -1108,6 +1108,19 @@ write_sidekick_env SIDEKICK_PLATFORM_TOKEN "${SIDEKICK_PLATFORM_TOKEN_VALUE}"
 write_sidekick_env SIDEKICK_PLATFORM_ALLOW_ALL_USERS "${SIDEKICK_PLATFORM_ALLOW_ALL_USERS:-true}"
 write_sidekick_env SIDEKICK_PUSH_OWNED_BY_PLUGIN "true"
 write_sidekick_env SIDEKICK_INFLIGHT_OWNED_BY_PLUGIN "true"
+# Voice STT/TTS: the audio bridge AND the proxy load sidekick/.env
+# (EnvironmentFile in both units), so the Deepgram key has to live HERE,
+# not just in the workflow .env above. Without this the bridge starts with
+# no key and every /v1/transcribe 500s ("DeepgramSTT requires an API key"),
+# which surfaces in the PWA as voice memos stuck "stalled / queued". Resolve
+# __KEEP__ to the existing value like OPENAI_KEY_FOR_DEFAULTS does.
+DEEPGRAM_KEY_FOR_SIDEKICK="${DEEPGRAM_API_KEY:-}"
+[[ "${DEEPGRAM_KEY_FOR_SIDEKICK}" == "__KEEP__" ]] && DEEPGRAM_KEY_FOR_SIDEKICK="$(env_value DEEPGRAM_API_KEY)"
+if [[ -n "${DEEPGRAM_KEY_FOR_SIDEKICK}" ]]; then
+  write_sidekick_env DEEPGRAM_API_KEY "${DEEPGRAM_KEY_FOR_SIDEKICK}"
+else
+  warn "DEEPGRAM_API_KEY not set; Sidekick voice memos (STT/TTS) will fail until a key is added to ${SIDEKICK_ENV_FILE}."
+fi
 ok "secrets written to ${ENV_FILE} (mode 600)"
 
 # ── 7b. Apply local patches ──────────────────────────────────────────
