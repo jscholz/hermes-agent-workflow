@@ -438,7 +438,7 @@ If bootstrap fell back to native Sidekick HTTPS, verify with
 
 Security check: Tailscale Serve is tailnet-only, not user-only. If the
 user wants a personal agent, verify the tailnet ACL restricts
-`<host>:3001` to Jon-owned devices. A tagged workstation such as Cortex
+`<host>:3001` to owner-owned devices. A tagged workstation
 must not be able to fetch `/api/sidekick/sessions` unless the user has
 explicitly allowed it.
 

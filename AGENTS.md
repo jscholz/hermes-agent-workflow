@@ -22,6 +22,6 @@ This is a thin pointer file. The substantive guidance lives elsewhere:
 
 If you're a contributor-Claude (not an installer-Claude), most
 useful patterns: keep PRs scoped to single concerns, follow the PII
-hygiene in `~/code/hermes-agent-private/skills/pii-scrub-public-sync/`
+hygiene in your fork's own pii-scrub skill
 (if you're pulling private→public), and don't push without explicit
 user consent.
