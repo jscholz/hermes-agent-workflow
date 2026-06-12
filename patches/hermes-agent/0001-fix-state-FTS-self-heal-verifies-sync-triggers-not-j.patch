@@ -1,0 +1,89 @@
+From 7ec8fb305014e5f1c2884aa1ce493b713ce2d760 Mon Sep 17 00:00:00 2001
+From: Jonathan Scholz <jonathan.scholz@gmail.com>
+Date: Fri, 12 Jun 2026 16:27:39 +0000
+Subject: [PATCH] fix(state): FTS self-heal verifies sync triggers, not just
+ the table
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+A restored state.db can carry the FTS virtual tables without their
+sync triggers (external restore tooling rebuilt tables only), which
+silently freezes the search index while messages keep flowing — this
+bit a live deployment from 2026-05-26 to 06-12. Startup now checks
+each FTS family for table + all three triggers; if any piece is
+missing it rebuilds the whole family and backfills from messages.
+
+Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>
+---
+ hermes_state.py | 54 +++++++++++++++++++++++++++++++++++++++----------
+ 1 file changed, 43 insertions(+), 11 deletions(-)
+
+diff --git a/hermes_state.py b/hermes_state.py
+index 0391047d0..7addc546f 100644
+--- a/hermes_state.py
++++ b/hermes_state.py
+@@ -678,17 +678,49 @@ class SessionDB:
+         except sqlite3.OperationalError:
+             pass  # Index already exists
+ 
+-        # FTS5 setup (separate because CREATE VIRTUAL TABLE can't be in executescript with IF NOT EXISTS reliably)
+-        try:
+-            cursor.execute("SELECT * FROM messages_fts LIMIT 0")
+-        except sqlite3.OperationalError:
+-            cursor.executescript(FTS_SQL)
+-
+-        # Trigram FTS5 for CJK/substring search
+-        try:
+-            cursor.execute("SELECT * FROM messages_fts_trigram LIMIT 0")
+-        except sqlite3.OperationalError:
+-            cursor.executescript(FTS_TRIGRAM_SQL)
++        # FTS5 setup — self-healing on BOTH the virtual table and its sync
++        # triggers. Checking only the table is not enough: a restored DB
++        # can carry FTS tables without triggers (external restore tooling
++        # rebuilds the tables but not the triggers), which silently freezes
++        # the index at restore time while messages keep flowing. If any
++        # piece of a family is missing, rebuild the whole family and
++        # backfill from messages.
++        for _fts_table, _fts_ddl in (
++            ("messages_fts", FTS_SQL),
++            ("messages_fts_trigram", FTS_TRIGRAM_SQL),
++        ):
++            _want_triggers = {f"{_fts_table}_{_op}" for _op in ("insert", "delete", "update")}
++            try:
++                cursor.execute(f"SELECT * FROM {_fts_table} LIMIT 0")
++                _table_ok = True
++            except sqlite3.OperationalError:
++                _table_ok = False
++            cursor.execute(
++                "SELECT name FROM sqlite_master WHERE type = 'trigger' AND name IN (?, ?, ?)",
++                tuple(sorted(_want_triggers)),
++            )
++            _have_triggers = {_row[0] for _row in cursor.fetchall()}
++            if _table_ok and _have_triggers == _want_triggers:
++                continue
++            if _table_ok:
++                # Table present but triggers missing/partial = the broken-
++                # restore case; the index has been silently frozen.
++                logger.warning(
++                    "FTS family %s has table but %s/%s triggers — rebuilding + backfilling",
++                    _fts_table, len(_have_triggers), len(_want_triggers),
++                )
++            for _trig in sorted(_want_triggers):
++                cursor.execute(f"DROP TRIGGER IF EXISTS {_trig}")
++            cursor.execute(f"DROP TABLE IF EXISTS {_fts_table}")
++            cursor.executescript(_fts_ddl)
++            cursor.execute(
++                f"INSERT INTO {_fts_table}(rowid, content) "
++                "SELECT id, "
++                "COALESCE(content, '') || ' ' || "
++                "COALESCE(tool_name, '') || ' ' || "
++                "COALESCE(tool_calls, '') "
++                "FROM messages"
++            )
+ 
+         self._conn.commit()
+ 
+-- 
+2.43.0
+

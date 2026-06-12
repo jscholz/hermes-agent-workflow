@@ -123,13 +123,27 @@ ok "data tables loaded"
 # The dump skipped messages_fts* (derivable). The FTS tables on this
 # schema are CONTENTLESS standalone fts5 (no content='messages' link),
 # so they don't auto-rebuild from messages — we have to populate them
-# manually from the messages.content column. rowid is aligned with
-# messages.id so the app's existing FTS lookup paths keep working.
+# manually. rowid is aligned with messages.id so the app's existing FTS
+# lookup paths keep working.
+#
+# CRITICAL: the SYNC TRIGGERS must be recreated too, with the exact
+# names/formula from hermes_state.py (FTS_SQL / FTS_TRIGRAM_SQL).
+# A restore that rebuilds only the tables leaves the index silently
+# FROZEN at restore time — new messages never get indexed (this bit us:
+# search was dead 2026-05-26→06-12). hermes_state.py now self-heals a
+# trigger-less DB at gateway startup, but the restore should produce a
+# correct DB on its own.
 say "rebuilding FTS indexes..."
 "${SQLITE3}" "${LIVE_DB}" <<'SQL'
--- Drop any FTS tables left from a prior partial restore (defensive).
+-- Drop any FTS leftovers from a prior partial restore (defensive).
 DROP TABLE IF EXISTS messages_fts;
 DROP TABLE IF EXISTS messages_fts_trigram;
+DROP TRIGGER IF EXISTS messages_fts_insert;
+DROP TRIGGER IF EXISTS messages_fts_delete;
+DROP TRIGGER IF EXISTS messages_fts_update;
+DROP TRIGGER IF EXISTS messages_fts_trigram_insert;
+DROP TRIGGER IF EXISTS messages_fts_trigram_delete;
+DROP TRIGGER IF EXISTS messages_fts_trigram_update;
 
 -- Standard FTS5 (token-based) — column is 'content'
 CREATE VIRTUAL TABLE messages_fts USING fts5(content);
@@ -137,12 +151,58 @@ CREATE VIRTUAL TABLE messages_fts USING fts5(content);
 -- Trigram FTS5 (substring-search support)
 CREATE VIRTUAL TABLE messages_fts_trigram USING fts5(content, tokenize='trigram');
 
--- Populate from messages (NULL content rows are tool_call frames; skip).
+-- Sync triggers (verbatim from hermes_state.py FTS_SQL / FTS_TRIGRAM_SQL).
+CREATE TRIGGER messages_fts_insert AFTER INSERT ON messages BEGIN
+    INSERT INTO messages_fts(rowid, content) VALUES (
+        new.id,
+        COALESCE(new.content, '') || ' ' || COALESCE(new.tool_name, '') || ' ' || COALESCE(new.tool_calls, '')
+    );
+END;
+CREATE TRIGGER messages_fts_delete AFTER DELETE ON messages BEGIN
+    DELETE FROM messages_fts WHERE rowid = old.id;
+END;
+CREATE TRIGGER messages_fts_update AFTER UPDATE ON messages BEGIN
+    DELETE FROM messages_fts WHERE rowid = old.id;
+    INSERT INTO messages_fts(rowid, content) VALUES (
+        new.id,
+        COALESCE(new.content, '') || ' ' || COALESCE(new.tool_name, '') || ' ' || COALESCE(new.tool_calls, '')
+    );
+END;
+CREATE TRIGGER messages_fts_trigram_insert AFTER INSERT ON messages BEGIN
+    INSERT INTO messages_fts_trigram(rowid, content) VALUES (
+        new.id,
+        COALESCE(new.content, '') || ' ' || COALESCE(new.tool_name, '') || ' ' || COALESCE(new.tool_calls, '')
+    );
+END;
+CREATE TRIGGER messages_fts_trigram_delete AFTER DELETE ON messages BEGIN
+    DELETE FROM messages_fts_trigram WHERE rowid = old.id;
+END;
+CREATE TRIGGER messages_fts_trigram_update AFTER UPDATE ON messages BEGIN
+    DELETE FROM messages_fts_trigram WHERE rowid = old.id;
+    INSERT INTO messages_fts_trigram(rowid, content) VALUES (
+        new.id,
+        COALESCE(new.content, '') || ' ' || COALESCE(new.tool_name, '') || ' ' || COALESCE(new.tool_calls, '')
+    );
+END;
+
+-- Backfill with the same formula the triggers use (content + tool_name +
+-- tool_calls — tool frames are searchable too, matching hermes_state.py
+-- v11 backfill exactly).
 INSERT INTO messages_fts(rowid, content)
-  SELECT id, content FROM messages WHERE content IS NOT NULL;
+  SELECT id, COALESCE(content, '') || ' ' || COALESCE(tool_name, '') || ' ' || COALESCE(tool_calls, '')
+  FROM messages;
 INSERT INTO messages_fts_trigram(rowid, content)
-  SELECT id, content FROM messages WHERE content IS NOT NULL;
+  SELECT id, COALESCE(content, '') || ' ' || COALESCE(tool_name, '') || ' ' || COALESCE(tool_calls, '')
+  FROM messages;
 SQL
+
+# Verify the triggers actually landed — a restore that produces a
+# frozen index should fail loudly, not ship.
+trigger_count=$("${SQLITE3}" "${LIVE_DB}" \
+  "SELECT count(*) FROM sqlite_master WHERE type='trigger' AND name LIKE 'messages_fts%';")
+if [[ "${trigger_count}" != "6" ]]; then
+  die "FTS rebuild incomplete: expected 6 sync triggers, found ${trigger_count}"
+fi
 
 ok "restore complete"
 echo
