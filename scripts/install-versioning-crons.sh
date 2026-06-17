@@ -52,6 +52,11 @@ if [[ ! -f "$REPO/.gitattributes" ]] || ! grep -q '^hermes-data/\*\*' "$REPO/.gi
   exit 1
 fi
 
+# sqlite3 (CLI) is required by the daily state.db / sidekick.db dump crons. Warn
+# rather than fail — the other crons (hindsight, sync, prune) work without it.
+command -v sqlite3 >/dev/null 2>&1 || \
+  echo "WARNING: sqlite3 not on PATH — sync-hermes-state.sh and sync-sidekick-db.sh will fail until installed (e.g. 'sudo apt-get install -y sqlite3')." >&2
+
 if (( ! ASSUME_YES )); then
   cat <<EOF
 About to install private sync crons for:
@@ -85,6 +90,10 @@ awk -v begin="$begin" -v end="$end" -v repo="$REPO" '
 
 cat >> "$tmp_new" <<EOF
 $begin
+# cron's default PATH (/usr/bin:/bin) lacks ~/.local/bin (the 'hermes' CLI) and
+# other tool dirs the sync scripts need. Set a richer PATH for this block.
+# (The Hindsight dump finds pg0's pg_dump via an absolute path regardless.)
+PATH=$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin
 */10 * * * * REPO="$REPO" HERMES="$HERMES_HOME" HOST_NAME="$HOST_NAME" "$REPO/scripts/doctor.sh" >> "$HERMES_HOME/logs/doctor.log" 2>&1
 */15 * * * * REPO="$REPO" HERMES="$HERMES_HOME" HOST_NAME="$HOST_NAME" "$REPO/scripts/sync-hermes.sh" >> "$HERMES_HOME/logs/sync-hermes.log" 2>&1
 */15 * * * * REPO="$REPO" HOST_NAME="$HOST_NAME" "$REPO/scripts/sync-cc-history.sh" >> "$HERMES_HOME/logs/sync-cc-history.log" 2>&1

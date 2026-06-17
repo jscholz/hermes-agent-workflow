@@ -6,7 +6,7 @@ just learned, how big the memory bank has grown, etc — without going
 through the agent itself.
 
 The slim hindsight server runs as `hindsight-server.service` (systemd
-user unit) on port 8765. Bank name is `jonathan`. All commands below
+user unit) on port 8765. Bank name is `default`. All commands below
 assume those defaults; adjust if you spin up a second bank later.
 
 ---
@@ -16,7 +16,7 @@ assume those defaults; adjust if you spin up a second bank later.
 | What | Where |
 |---|---|
 | Live API server | `http://127.0.0.1:8765` (loopback only) |
-| Bank ID | `jonathan` |
+| Bank ID | `default` |
 | Postgres data dir (pg0, embedded) | `~/.hermes/hindsight/pg0/` |
 | Bank dump backups | `~/.hermes/hindsight/bank-dumps/` (daily cron at 03:33) |
 | Hindsight config | `~/.hermes/hindsight/config.json` (mode=local_external, reranker=rrf) |
@@ -46,7 +46,7 @@ saw this exact symptom in the agent.log earlier). Doctor.sh checks it.
 curl -s http://127.0.0.1:8765/v1/default/banks | jq
 ```
 
-You should see one bank — `jonathan`. If you ever want a sandbox bank
+You should see one bank — `default`. If you ever want a sandbox bank
 for friends or experiments, this is where they'd appear.
 
 ---
@@ -54,15 +54,15 @@ for friends or experiments, this is where they'd appear.
 ## List recent memories
 
 ```bash
-# Most recent 20 memories in the jonathan bank
-curl -s 'http://127.0.0.1:8765/v1/default/banks/jonathan/memories/list?limit=20' | jq
+# Most recent 20 memories in the default bank
+curl -s 'http://127.0.0.1:8765/v1/default/banks/default/memories/list?limit=20' | jq
 
 # Just the text + date (compact view)
-curl -s 'http://127.0.0.1:8765/v1/default/banks/jonathan/memories/list?limit=20' \
+curl -s 'http://127.0.0.1:8765/v1/default/banks/default/memories/list?limit=20' \
   | jq '.items[] | {date, text}'
 
 # Filter: only memories from today
-curl -s 'http://127.0.0.1:8765/v1/default/banks/jonathan/memories/list?limit=200' \
+curl -s 'http://127.0.0.1:8765/v1/default/banks/default/memories/list?limit=200' \
   | jq --arg today "$(date -u +%Y-%m-%d)" \
        '.items[] | select(.date | startswith($today)) | {date, text}'
 ```
@@ -83,10 +83,10 @@ item has:
 
 ```bash
 # Full record
-curl -s 'http://127.0.0.1:8765/v1/default/banks/jonathan/memories/<MEMORY_ID>' | jq
+curl -s 'http://127.0.0.1:8765/v1/default/banks/default/memories/<MEMORY_ID>' | jq
 
 # History — every turn that touched this memory (retain, consolidate, etc)
-curl -s 'http://127.0.0.1:8765/v1/default/banks/jonathan/memories/<MEMORY_ID>/history' | jq
+curl -s 'http://127.0.0.1:8765/v1/default/banks/default/memories/<MEMORY_ID>/history' | jq
 ```
 
 The `history` endpoint is the audit trail: which conversation introduced
@@ -102,12 +102,12 @@ the agent surface X if I asked Y?"
 
 ```bash
 # Search for memories about a topic
-curl -s -X POST 'http://127.0.0.1:8765/v1/default/banks/jonathan/memories/recall' \
+curl -s -X POST 'http://127.0.0.1:8765/v1/default/banks/default/memories/recall' \
   -H 'content-type: application/json' \
   -d '{"query":"interaction video","limit":5}' | jq
 
 # Just the hits, compact
-curl -s -X POST 'http://127.0.0.1:8765/v1/default/banks/jonathan/memories/recall' \
+curl -s -X POST 'http://127.0.0.1:8765/v1/default/banks/default/memories/recall' \
   -H 'content-type: application/json' \
   -d '{"query":"who is helping me","limit":10}' \
   | jq '.items[] | {score, text}'
@@ -122,7 +122,7 @@ keyword model — no torch, no GPU. Fast on a Pi.
 
 ```bash
 # Total memory count (asks for a big page, counts what comes back)
-curl -s 'http://127.0.0.1:8765/v1/default/banks/jonathan/memories/list?limit=10000' \
+curl -s 'http://127.0.0.1:8765/v1/default/banks/default/memories/list?limit=10000' \
   | jq '.items | length'
 
 # Prometheus-style metrics — request counts, durations, error rates
@@ -167,7 +167,7 @@ The auto-extractor uses kebab-case tags. Examples already in the bank:
 
 - `r2`, `reimagine-robotics` — work / company context
 - `interaction-video`, `content-push` — specific projects
-- `mosaic-tile-storyboard`, `jon-owned` — finer-grained scope
+- `mosaic-tile-storyboard`, `owner-scoped` — finer-grained scope
 - `sidekick`, `hermes` — toolchain context
 
 Tags are searchable via the recall endpoint (just include the tag in

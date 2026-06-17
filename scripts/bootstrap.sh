@@ -322,13 +322,13 @@ if command -v tailscale >/dev/null 2>&1; then
       unset_sidekick_env SIDEKICK_HTTPS_CERT_FILE
       unset_sidekick_env SIDEKICK_HTTPS_KEY_FILE
       ok "configured Tailscale Serve: https://${TAILSCALE_DNS}:3001/ → http://127.0.0.1:3001"
-      warn "Tailscale Serve is tailnet-only, not user-only. Restrict ${HOST_NAME}:3001 in the tailnet ACL if this agent must be Jon-only."
+      warn "Tailscale Serve is tailnet-only, not user-only. Restrict ${HOST_NAME}:3001 in the tailnet ACL if this agent must be owner-only."
     elif sudo -n tailscale set --operator="${USER}" >/dev/null 2>&1 \
       && tailscale serve --bg --https=3001 http://127.0.0.1:3001 >/dev/null 2>&1; then
       unset_sidekick_env SIDEKICK_HTTPS_CERT_FILE
       unset_sidekick_env SIDEKICK_HTTPS_KEY_FILE
       ok "configured Tailscale Serve: https://${TAILSCALE_DNS}:3001/ → http://127.0.0.1:3001"
-      warn "Tailscale Serve is tailnet-only, not user-only. Restrict ${HOST_NAME}:3001 in the tailnet ACL if this agent must be Jon-only."
+      warn "Tailscale Serve is tailnet-only, not user-only. Restrict ${HOST_NAME}:3001 in the tailnet ACL if this agent must be owner-only."
     else
       warn "Tailscale Serve could not be configured without a password."
       warn "Run once, then re-run bootstrap: sudo tailscale set --operator=${USER}"
@@ -635,6 +635,56 @@ else
   warn "${HERMES_BIN_LINK} exists and is not a symlink — leaving as-is"
 fi
 
+# ── Dashboard web UI (frontend build) ────────────────────────────────
+# The hermes-dashboard systemd unit sets HERMES_WEB_DIST (to skip the slow
+# build-on-start), so `hermes dashboard` will NOT auto-build the frontend — it
+# expects a prebuilt hermes_cli/web_dist. The PyPI package ships one; our
+# editable git clone does NOT (it carries the web/ source instead), so without
+# this the dashboard serves {"error":"Frontend not built"}. Build it here.
+# Vite's outDir is ../hermes_cli/web_dist (web/vite.config.ts) == HERMES_WEB_DIST,
+# so no copy/path fixup is needed.
+#
+# Rebuild policy: stamp the built dist with the hermes-agent commit it was built
+# from, and rebuild whenever that commit changes (i.e. after `hermes update` /
+# git pull) — otherwise a stale dashboard UI lingers because index.html still
+# exists. Skip only when already built from the exact current commit.
+# Non-fatal: a frontend build hiccup must not abort the whole install.
+HERMES_WEB_DIR="${HERMES_AGENT_REPO}/web"
+HERMES_WEB_DIST_DIR="${HERMES_AGENT_REPO}/hermes_cli/web_dist"
+HERMES_WEB_BUILT_MARKER="${HERMES_WEB_DIST_DIR}/.built_from_commit"
+hermes_agent_sha="$(git -C "${HERMES_AGENT_REPO}" rev-parse HEAD 2>/dev/null || echo unknown)"
+web_built_sha="$(cat "${HERMES_WEB_BUILT_MARKER}" 2>/dev/null || echo none)"
+web_rebuilt=0
+if [[ -f "${HERMES_WEB_DIST_DIR}/index.html" && "${hermes_agent_sha}" != "unknown" \
+      && "${web_built_sha}" == "${hermes_agent_sha}" ]]; then
+  ok "dashboard web UI up to date (built from ${hermes_agent_sha:0:8})"
+elif [[ -d "${HERMES_WEB_DIR}" ]] && command -v npm >/dev/null 2>&1; then
+  if [[ -f "${HERMES_WEB_DIST_DIR}/index.html" ]]; then
+    info "rebuilding dashboard web UI — hermes-agent changed (${web_built_sha:0:8} → ${hermes_agent_sha:0:8})"
+  else
+    info "building dashboard web UI (npm install + build; one-time, ~1-2 min)"
+  fi
+  if npm install --prefix "${HERMES_WEB_DIR}" && npm run build --prefix "${HERMES_WEB_DIR}"; then
+    if [[ -f "${HERMES_WEB_DIST_DIR}/index.html" ]]; then
+      printf '%s\n' "${hermes_agent_sha}" > "${HERMES_WEB_BUILT_MARKER}" 2>/dev/null || true
+      web_rebuilt=1
+      ok "dashboard web UI built → ${HERMES_WEB_DIST_DIR} (from ${hermes_agent_sha:0:8})"
+    else
+      warn "web UI build ran but ${HERMES_WEB_DIST_DIR}/index.html missing — dashboard will show 'Frontend not built'"
+    fi
+  else
+    warn "dashboard web UI build failed (non-fatal). Re-run manually: npm install --prefix ${HERMES_WEB_DIR} && npm run build --prefix ${HERMES_WEB_DIR}"
+  fi
+else
+  warn "skipping dashboard web UI build (no ${HERMES_WEB_DIR} or npm not on PATH) — dashboard UI will be unavailable"
+fi
+# If we rebuilt and the dashboard is already running (e.g. an update re-run),
+# restart it so it serves the new assets. try-restart is a no-op when the unit
+# isn't active yet (fresh install — the smoke-test starts it fresh below).
+if [[ "${web_rebuilt}" == "1" ]]; then
+  systemctl --user try-restart hermes-dashboard.service 2>/dev/null || true
+fi
+
 # Hindsight slim needs the embedded Postgres extra for the local memory
 # API server path used by this workflow.
 ensure_venv "${HERMES_HOME}/hindsight-venv" "hindsight-api-slim[embedded-db]"
@@ -678,7 +728,10 @@ if [[ -d "${AUDIO_BRIDGE_DIR}" && "${SIDEKICK_AUDIO_ENABLED}" == "1" ]]; then
   fi
 
   info "installing audio-bridge dependencies"
-  (cd "${AUDIO_BRIDGE_DIR}" && uv venv && uv pip install -r "${audio_requirements}")
+  # `uv venv` refuses to recreate an existing .venv (exits non-zero → set -e
+  # would abort the whole bootstrap on re-run). Guard it like the other venvs:
+  # only create when absent; `uv pip install` is itself idempotent.
+  (cd "${AUDIO_BRIDGE_DIR}" && { [[ -x .venv/bin/python ]] || uv venv; } && uv pip install -r "${audio_requirements}")
   [[ -n "${audio_requirements_tmp}" ]] && rm -f "${audio_requirements_tmp}"
 elif [[ -d "${AUDIO_BRIDGE_DIR}" ]]; then
   warn "skipping sidekick audio bridge on this host. Set INSTALL_SIDEKICK_AUDIO_BRIDGE=1 to install it explicitly."
@@ -881,7 +934,54 @@ render_unit() {
   fi
 }
 
-render_unit "systemd/hermes-gateway.service"   "hermes-gateway.service"
+# hermes-gateway is SELF-MANAGED by hermes: it rewrites its own unit on every
+# boot/start/restart (refresh_systemd_unit_if_needed, gateway/run.py), so a full
+# workflow unit gets clobbered. Let hermes own the MAIN unit and layer the
+# workflow's env via a drop-in — hermes's self-heal does not touch the .d/ dir,
+# so these survive. (See DESIGN-DECISIONS.md §9.) Write the drop-in first so it
+# is present the moment hermes creates/starts the unit.
+# Copy the versioned drop-in into place. %h is a systemd specifier expanded at
+# unit-load time, so the file needs no rendering — a plain copy suffices.
+GW_DROPIN_SRC="${REPO}/systemd/hermes-gateway.service.d/10-workflow.conf"
+GW_DROPIN_DIR="${SYSTEMD_DST}/hermes-gateway.service.d"
+if [[ -f "${GW_DROPIN_SRC}" ]]; then
+  mkdir -p "${GW_DROPIN_DIR}"
+  cp "${GW_DROPIN_SRC}" "${GW_DROPIN_DIR}/10-workflow.conf"
+  ok "installed gateway drop-in → ${GW_DROPIN_DIR}/10-workflow.conf"
+else
+  warn "gateway drop-in template missing: ${GW_DROPIN_SRC} (gateway env overrides not applied)"
+fi
+# `hermes gateway install` is interactive (prompts: start-now?, enable-on-boot?,
+# and a legacy-unit cleanup prompt). Drive it with `expect` so prompt
+# reordering/additions don't misalign answers the way positional stdin piping
+# would: start-now=n (the smoke-test below starts it), enable-on-boot=y.
+if [[ -x "${HERMES_BIN_LINK}" ]] && command -v expect >/dev/null 2>&1; then
+  info "installing hermes-managed gateway unit (hermes gateway install, via expect)"
+  expect <<EXPECT >/dev/null 2>&1
+set timeout 90
+spawn "${HERMES_BIN_LINK}" gateway install
+expect {
+  -re {[Rr]emove the legacy unit}          { send "y\r"; exp_continue }
+  -re {[Ss]tart the gateway now}            { send "n\r"; exp_continue }
+  -re {[Ss]tart the gateway automatically}  { send "y\r"; exp_continue }
+  timeout { exit 2 }
+  eof
+}
+EXPECT
+  if systemctl --user cat hermes-gateway.service >/dev/null 2>&1; then
+    ok "hermes gateway unit installed (workflow drop-in layered on top)"
+  else
+    warn "gateway unit not installed — run 'hermes gateway install' manually, then re-run bootstrap"
+  fi
+elif [[ -x "${HERMES_BIN_LINK}" ]]; then
+  warn "expect not on PATH — cannot auto-answer 'hermes gateway install' prompts."
+  warn "  Install it ('sudo apt-get install -y expect') and re-run, or run 'hermes gateway install' once manually."
+else
+  warn "${HERMES_BIN_LINK} not found — cannot install hermes gateway unit"
+fi
+
+# Dashboard, hindsight, sidekick are workflow-managed (hermes does not self-heal
+# these), so they use full rendered units.
 render_unit "systemd/hermes-dashboard.service" "hermes-dashboard.service"
 render_unit "systemd/hindsight-server.service" "hindsight-server.service"
 render_unit "systemd/sidekick.service"         "sidekick.service"
@@ -1008,6 +1108,19 @@ write_sidekick_env SIDEKICK_PLATFORM_TOKEN "${SIDEKICK_PLATFORM_TOKEN_VALUE}"
 write_sidekick_env SIDEKICK_PLATFORM_ALLOW_ALL_USERS "${SIDEKICK_PLATFORM_ALLOW_ALL_USERS:-true}"
 write_sidekick_env SIDEKICK_PUSH_OWNED_BY_PLUGIN "true"
 write_sidekick_env SIDEKICK_INFLIGHT_OWNED_BY_PLUGIN "true"
+# Voice STT/TTS: the audio bridge AND the proxy load sidekick/.env
+# (EnvironmentFile in both units), so the Deepgram key has to live HERE,
+# not just in the workflow .env above. Without this the bridge starts with
+# no key and every /v1/transcribe 500s ("DeepgramSTT requires an API key"),
+# which surfaces in the PWA as voice memos stuck "stalled / queued". Resolve
+# __KEEP__ to the existing value like OPENAI_KEY_FOR_DEFAULTS does.
+DEEPGRAM_KEY_FOR_SIDEKICK="${DEEPGRAM_API_KEY:-}"
+[[ "${DEEPGRAM_KEY_FOR_SIDEKICK}" == "__KEEP__" ]] && DEEPGRAM_KEY_FOR_SIDEKICK="$(env_value DEEPGRAM_API_KEY)"
+if [[ -n "${DEEPGRAM_KEY_FOR_SIDEKICK}" ]]; then
+  write_sidekick_env DEEPGRAM_API_KEY "${DEEPGRAM_KEY_FOR_SIDEKICK}"
+else
+  warn "DEEPGRAM_API_KEY not set; Sidekick voice memos (STT/TTS) will fail until a key is added to ${SIDEKICK_ENV_FILE}."
+fi
 ok "secrets written to ${ENV_FILE} (mode 600)"
 
 # ── 7b. Apply local patches ──────────────────────────────────────────
@@ -1058,7 +1171,12 @@ add_cron() {
     ok "cron already has: ${pattern}"
     return
   fi
-  (crontab -l 2>/dev/null; echo "${line}") | crontab -
+  # `|| true`: under `set -euo pipefail`, a bare `crontab -l` that exits
+  # non-zero on a fresh user (no crontab yet) would abort this subshell before
+  # the echo — feeding `crontab -` empty input AND failing the pipeline via
+  # pipefail, which aborted the whole bootstrap before the smoke-test. The
+  # install itself works fine; only the empty-crontab probe needed tolerating.
+  (crontab -l 2>/dev/null || true; echo "${line}") | crontab -
   ok "added cron: ${pattern}"
 }
 
