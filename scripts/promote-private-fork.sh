@@ -226,15 +226,15 @@ if (( ! SKIP_GOOGLE_OAUTH )); then
   done
 fi
 copy_dir_from_live "$HOME/.hermes/whatsapp/session" "whatsapp/session" "WhatsApp session"
-copy_dir_from_live "$HOME/.hermes/pairing" "pairing" "Sidekick pairing"
+copy_dir_from_live "$HOME/.hermes/pairing" "pairing" "Parley pairing"
 if (( ! SKIP_GOOGLE_OAUTH )); then
   copy_dir_from_live "$HOME/.config/gogcli" "gogcli" "gogcli config/keyring"
 fi
 copy_dir_from_live "$HOME/.hermes/host-state/$HOST_NAME/claude-code-memory" "hosts/$HOST_NAME/claude-code-memory" "Claude Code host memory"
 
 printf 'active_host=%s\n' "$HOST_NAME" > "$REPO/ACTIVE_HOST"
-mkdir -p "$REPO/sessions" "$REPO/hermes-data" "$REPO/hindsight-data" "$REPO/sidekick-data"
-touch "$REPO/sessions/.gitkeep" "$REPO/hermes-data/.gitkeep" "$REPO/hindsight-data/.gitkeep" "$REPO/sidekick-data/.gitkeep"
+mkdir -p "$REPO/sessions" "$REPO/hermes-data" "$REPO/hindsight-data" "$REPO/parley-data"
+touch "$REPO/sessions/.gitkeep" "$REPO/hermes-data/.gitkeep" "$REPO/hindsight-data/.gitkeep" "$REPO/parley-data/.gitkeep"
 
 if (( RERUN_BOOTSTRAP )); then
   HERMES_WORKFLOW_HOST_STATE_MODE=versioned HOST_NAME="$HOST_NAME" "$REPO/scripts/bootstrap.sh" --unattended
@@ -262,7 +262,7 @@ if (( RUN_INITIAL_SYNC )); then
   "$REPO/scripts/sync-hermes.sh" || true
   "$REPO/scripts/sync-cc-history.sh" || true
   "$REPO/scripts/sync-hermes-state.sh" || true
-  "$REPO/scripts/sync-sidekick-db.sh" || true
+  "$REPO/scripts/sync-parley-db.sh" || true
   "$REPO/scripts/sync-hindsight-bank.sh" || true
 fi
 

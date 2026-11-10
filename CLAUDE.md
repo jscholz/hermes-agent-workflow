@@ -68,7 +68,7 @@ Tell the user, in your own voice, roughly:
 
 > I'm going to install hermes-agent-workflow on this machine. By the
 > end you'll have: a hermes gateway running on systemd-user, optionally
-> a sidekick PWA you can hit from your phone, a hindsight memory backend,
+> a parley PWA you can hit from your phone, a hindsight memory backend,
 > and your own private fork of this repo on GitHub holding all your
 > config + secrets encrypted with git-crypt. Takes ~15 minutes if
 > everything's pre-installed, ~30 if I have to walk you through deps.
@@ -97,7 +97,7 @@ which gh                               # GitHub CLI; nice-to-have for cold-start
 which ffmpeg
 which tmux
 which claude                           # already true if user is talking to you
-which bun                              # only if sidekick desired
+which bun                              # only if parley desired
 which hermes                           # tells us if `pip install hermes-agent && hermes setup` ran
 ```
 
@@ -106,12 +106,12 @@ already on PATH.
 
 **What you confirm with the user**:
 - If python is too old: "I see python 3.10. Bootstrap needs 3.11+. Want me to walk you through `uv python install 3.11`, or do you have a preference?"
-- If `bun` is missing: "Sidekick (the PWA frontend) needs bun. Want sidekick? If yes, install line is `curl -fsSL https://bun.sh/install | bash`. If no, skip — sidekick is optional."
+- If `bun` is missing: "Parley (the PWA frontend) needs bun. Want parley? If yes, install line is `curl -fsSL https://bun.sh/install | bash`. If no, skip — parley is optional."
 - If `gh` is missing AND we're cold-starting: "I don't see `gh` (GitHub CLI). Without it, the GitHub-fork step needs you to do it manually. Want to install gh first, or proceed manually?"
 
 **Sample**:
 
-> Claude: Quick prereq sweep. Found: python 3.11.8, node v22.4.1, git 2.43, git-crypt 0.7.0, uv, ffmpeg, tmux. Missing: gh (GitHub CLI) and bun. gh makes the fork step automatic — without it I'll print copy-paste instructions. bun is needed for the sidekick PWA. Want sidekick?
+> Claude: Quick prereq sweep. Found: python 3.11.8, node v22.4.1, git 2.43, git-crypt 0.7.0, uv, ffmpeg, tmux. Missing: gh (GitHub CLI) and bun. gh makes the fork step automatic — without it I'll print copy-paste instructions. bun is needed for the parley PWA. Want parley?
 >
 > User: yes, but I'll install bun in another terminal — give me a sec
 >
@@ -234,7 +234,7 @@ Tell the user, **literally**:
 > `auth.json`, `google_*.json`, `gogcli/**`, `whatsapp/session/**`,
 > `pairing/**`, `memories/**`, `hosts/**`, `sessions/**`,
 > `cron/jobs.json`, `cron/output/**`, `hindsight-data/**`,
-> `hermes-data/**`, `sidekick-data/**`).
+> `hermes-data/**`, `parley-data/**`).
 >
 > **LOSING THIS KEY MEANS YOUR ENCRYPTED HISTORY IS UNRECOVERABLE.**
 >
@@ -293,13 +293,14 @@ supported secret. For now, ask the user only the ones needed at
 install time:
 
 **Required**:
-- `OPENROUTER_API_KEY` — "Hermes uses this for LLM access. Sign up at openrouter.ai if you don't have one."
-- `DEEPGRAM_API_KEY` — "STT for the audio bridge (sidekick). Free tier is fine. Skip with empty string if you don't want sidekick."
+- `OPENAI_API_KEY` — required: bootstrap uses it for the LLM and for Hindsight's embeddings/extraction. "Sign up at platform.openai.com if you don't have one."
+- `OPENROUTER_API_KEY` — optional alternate LLM provider key (bootstrap treats it as optional; README §8 agrees).
+- `DEEPGRAM_API_KEY` — "STT for the audio bridge (parley). Free tier is fine. Skip with empty string if you don't want parley."
 
 **Optional**:
 - `TAVILY_API_KEY` — "Web search. Skip if you don't want web tools yet."
 - `ANTHROPIC_API_KEY` — "Direct Claude API. OpenRouter covers it too — only set this if you have a reason."
-- `INSTALL_SIDEKICK_AUDIO_BARGE_VAD` — leave unset for the normal path. On Pi/ARM installs this keeps Deepgram STT/TTS enabled while skipping the optional Silero/Torch barge-VAD dependency; set to `1` only if the user explicitly wants bridge-side barge detection on that host.
+- `INSTALL_PARLEY_AUDIO_BARGE_VAD` — leave unset for the normal path. On Pi/ARM installs this keeps Deepgram STT/TTS enabled while skipping the optional Silero/Torch barge-VAD dependency; set to `1` only if the user explicitly wants bridge-side barge detection on that host.
 
 **Critical decisions** (surface explicitly):
 - "Do you want WhatsApp integration? If yes, I'll set up the Baileys QR-pairing at install time — you scan a QR on your phone." Default: ask. If no, set `WHATSAPP_ENABLED=false`.
@@ -316,7 +317,7 @@ OPENROUTER_API_KEY=...
 DEEPGRAM_API_KEY=...
 TAVILY_API_KEY=...                 # may be empty
 HOST_NAME=$(hostname -s)            # for the systemd unit names
-SIDEKICK_PATH=$HOME/code/sidekick   # default
+PARLEY_PATH=$HOME/code/parley   # default
 HERMES_HOME=$HOME/.hermes
 WHATSAPP_ENABLED=false              # or true if user opted in
 ```
@@ -355,7 +356,7 @@ Tell the user what's about to happen:
 
 > Now I'm going to invoke `scripts/bootstrap.sh --env-file
 > /tmp/hermes-bootstrap.env`. This will:
-> 1. Clone sidekick (if you opted in) to `~/code/sidekick`.
+> 1. Clone parley (if you opted in) to `~/code/parley`.
 > 2. Clone hermes-agent upstream to `~/.hermes/hermes-agent`.
 > 3. Build three uv venvs (hermes, hindsight, audio-bridge).
 > 4. Symlink ~16 entries from `~/.hermes/` back into your fork.
@@ -417,29 +418,29 @@ not configured" if user opted out).
 **Success criteria**: doctor exits 0, three core systemd services
 active, no unexpected warnings.
 
-## Section 9 — Optional: sidekick
+## Section 9 — Optional: parley
 
 **State**: hermes stack healthy.
 
-`bootstrap.sh` clones Sidekick, configures Tailscale Serve when
-available, installs `sidekick.service`, and starts it on local port
+`bootstrap.sh` clones Parley, configures Tailscale Serve when
+available, installs `parley.service`, and starts it on local port
 3001. The preferred external URL is
 `https://<host>.<tailnet>.ts.net:3001/`, backed by Tailscale's trusted
 certificate. Verify:
 
 ```bash
-systemctl --user status sidekick --no-pager
+systemctl --user status parley --no-pager
 curl http://127.0.0.1:3001/
 tailscale serve status
 ```
 
-If bootstrap fell back to native Sidekick HTTPS, verify with
+If bootstrap fell back to native Parley HTTPS, verify with
 `curl -k https://127.0.0.1:3001/` instead.
 
 Security check: Tailscale Serve is tailnet-only, not user-only. If the
 user wants a personal agent, verify the tailnet ACL restricts
-`<host>:3001` to Jon-owned devices. A tagged workstation such as Cortex
-must not be able to fetch `/api/sidekick/sessions` unless the user has
+`<host>:3001` to owner-owned devices. A tagged workstation such as Cortex
+must not be able to fetch `/api/parley/sessions` unless the user has
 explicitly allowed it.
 
 If bootstrap reports that Tailscale Serve could not be configured,
@@ -448,10 +449,10 @@ re-run bootstrap. Do not silently fall back to native self-signed
 HTTPS for a Tailscale install: it looks like the right URL but
 browsers still label it "Not Secure." Native self-signed HTTPS is only
 for explicit non-Tailscale installs via
-`SIDEKICK_ALLOW_SELF_SIGNED_FALLBACK=1`.
+`PARLEY_ALLOW_SELF_SIGNED_FALLBACK=1`.
 
-For full sidekick install behaviour, see [`sidekick/install.sh`](https://github.com/jscholz/sidekick/blob/master/install.sh)
-and [`sidekick/docs/MAC_BOOTSTRAP.md`](https://github.com/jscholz/sidekick/blob/master/docs/MAC_BOOTSTRAP.md)
+For full parley install behaviour, see [`parley/install.sh`](https://github.com/jscholz/parley/blob/master/install.sh)
+and [`parley/docs/MAC_BOOTSTRAP.md`](https://github.com/jscholz/parley/blob/master/docs/MAC_BOOTSTRAP.md)
 for the iOS Cap shell setup.
 
 ## Section 10 — Optional: claude-remote
@@ -485,9 +486,9 @@ Re-ask:
 
 If yes: walk the user through `crontab -e` and have them paste
 the lines from `cron/sync-hermes-state.cron.example` and
-`cron/sync-sidekick-db.cron.example` and
+`cron/sync-parley-db.cron.example` and
 `cron/sync-hindsight-bank.cron.example` (substituting `REPO_PATH`
-for the absolute path of their fork). Sidekick's dump is required
+for the absolute path of their fork). Parley's dump is required
 to preserve custom session titles, pins, push subscriptions,
 unread/activity state, and UI-facing message rows during host
 migration.
@@ -505,8 +506,8 @@ Running services:
   - hermes-gateway       (port 8642)
   - hermes-dashboard     (port set in your .env)
   - hindsight-server     (port 8765)
-  - sidekick             (local port 3001; Tailscale Serve for HTTPS)
-  - sidekick-audio       (port set in sidekick's .env)
+  - parley             (local port 3001; Tailscale Serve for HTTPS)
+  - parley-audio       (port set in parley's .env)
 
 State lives at:
   ~/.hermes/  →  symlinked into <fork-path>/

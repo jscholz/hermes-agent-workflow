@@ -97,7 +97,7 @@ platform_toolsets:
   google_chat: [hermes-google_chat]
 plugins:
   enabled:
-    - sidekick
+    - parley
 
 # WhatsApp adapter config (consumed when the gateway-bridge loads the
 # WhatsApp platform). All fields are optional; fill in values that match

@@ -25,7 +25,7 @@ health() {
 
 say "checking service health..."
 health "hindsight" 8765
-health "sidekick adapter" 8645
+health "parley adapter" 8645
 health "hermes gateway" 8642
 
 say "checking Hermes SQLite restore..."
@@ -36,12 +36,12 @@ else
   warn "missing sqlite3 or ${HERMES}/state.db"
 fi
 
-say "checking Sidekick supplemental DB restore..."
-if [[ -f "${HERMES}/sidekick.db" ]] && command -v sqlite3 >/dev/null 2>&1; then
-  sqlite3 "${HERMES}/sidekick.db" "SELECT 'sidekick_messages=' || (SELECT count(*) FROM msg_links) || ' titles=' || (SELECT count(*) FROM conversation_titles) || ' pins=' || (SELECT count(*) FROM pins) || ' push_subscriptions=' || (SELECT count(*) FROM push_subscriptions);" \
-    || warn "failed to query ${HERMES}/sidekick.db"
+say "checking Parley supplemental DB restore..."
+if [[ -f "${HERMES}/parley.db" ]] && command -v sqlite3 >/dev/null 2>&1; then
+  sqlite3 "${HERMES}/parley.db" "SELECT 'parley_messages=' || (SELECT count(*) FROM msg_links) || ' titles=' || (SELECT count(*) FROM conversation_titles) || ' pins=' || (SELECT count(*) FROM pins) || ' push_subscriptions=' || (SELECT count(*) FROM push_subscriptions);" \
+    || warn "failed to query ${HERMES}/parley.db"
 else
-  warn "missing sqlite3 or ${HERMES}/sidekick.db"
+  warn "missing sqlite3 or ${HERMES}/parley.db"
 fi
 
 say "checking Hermes cron state..."
@@ -55,7 +55,7 @@ if [[ -L "${HERMES}/scripts" ]]; then
 else
   warn "missing linked ${HERMES}/scripts"
 fi
-for pattern in doctor.sh sync-hermes.sh sync-cc-history.sh sync-hermes-state.sh sync-sidekick-db.sh sync-hindsight-bank.sh prune-claude-cc-history.sh; do
+for pattern in doctor.sh sync-hermes.sh sync-cc-history.sh sync-hermes-state.sh sync-parley-db.sh sync-hindsight-bank.sh prune-claude-cc-history.sh; do
   if crontab -l 2>/dev/null | grep -qF "${pattern}"; then
     ok "OS cron installed: ${pattern}"
   else

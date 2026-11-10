@@ -22,7 +22,7 @@ Installs a managed crontab block that snapshots and pushes:
   - doctor health checks every 10 min
   - Hermes state.db SQL dump daily
   - Hindsight bank SQL dump daily
-  - Sidekick UI DB SQL dump daily
+  - Parley UI DB SQL dump daily
 
 The script refuses to run if origin is the public template remote.
 EOF
@@ -79,7 +79,7 @@ awk -v begin="$begin" -v end="$end" -v repo="$REPO" '
   $0 == begin { skip=1; next }
   $0 == end { skip=0; next }
   skip != 1 && $0 !~ /^[[:space:]]*#/ && index($0, repo "/scripts/") > 0 &&
-    $0 ~ /(doctor|sync-hermes|sync-cc-history|sync-hermes-state|sync-hindsight-bank|sync-sidekick-db|prune-claude-cc-history)[.]sh/ { next }
+    $0 ~ /(doctor|sync-hermes|sync-cc-history|sync-hermes-state|sync-hindsight-bank|sync-parley-db|prune-claude-cc-history)[.]sh/ { next }
   skip != 1 { print }
 ' "$tmp_old" > "$tmp_new"
 
@@ -90,7 +90,7 @@ $begin
 */15 * * * * REPO="$REPO" HOST_NAME="$HOST_NAME" "$REPO/scripts/sync-cc-history.sh" >> "$HERMES_HOME/logs/sync-cc-history.log" 2>&1
 33 3 * * * REPO="$REPO" "$REPO/scripts/sync-hermes-state.sh" >> "$HERMES_HOME/logs/sync-hermes-state.log" 2>&1
 44 3 * * * REPO="$REPO" "$REPO/scripts/sync-hindsight-bank.sh" >> "$HERMES_HOME/logs/sync-hindsight-bank.log" 2>&1
-49 3 * * * REPO="$REPO" "$REPO/scripts/sync-sidekick-db.sh" >> "$HERMES_HOME/logs/sync-sidekick-db.log" 2>&1
+49 3 * * * REPO="$REPO" "$REPO/scripts/sync-parley-db.sh" >> "$HERMES_HOME/logs/sync-parley-db.log" 2>&1
 44 4 * * * "$REPO/scripts/prune-claude-cc-history.sh" >> "$HERMES_HOME/logs/prune-claude-cc-history.log" 2>&1
 $end
 EOF

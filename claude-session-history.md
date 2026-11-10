@@ -10,15 +10,15 @@ that lets a fresh session pick up where the last one left off.
 
 ## What this project is
 
-A claude-code workflow building and maintaining a hermes-agent + sidekick
+A claude-code workflow building and maintaining a hermes-agent + parley
 deployment, powered by:
 
 - **hermes-agent** — the Python agent runtime (skills, memory, gateway)
   living in `~/.hermes/hermes-agent/`, plus its venv at
   `~/.hermes/hermes-venv/`.
-- **sidekick** — the PWA front end (React + Bun proxy + Python audio
-  bridge) at `~/code/sidekick/`. Public repo:
-  `github.com/jscholz/sidekick`.
+- **parley** — the PWA front end (React + Bun proxy + Python audio
+  bridge) at `~/code/parley/`. Public repo:
+  `github.com/jscholz/parley`.
 - **this template** (`hermes-agent-workflow`) — the deployment shell:
   bootstrap script, systemd units, vendored skills, hermes-agent
   patches, and the framework/instance contract that keeps the rebase

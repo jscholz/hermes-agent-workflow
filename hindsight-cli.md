@@ -168,7 +168,7 @@ The auto-extractor uses kebab-case tags. Examples already in the bank:
 - `r2`, `reimagine-robotics` — work / company context
 - `interaction-video`, `content-push` — specific projects
 - `mosaic-tile-storyboard`, `jon-owned` — finer-grained scope
-- `sidekick`, `hermes` — toolchain context
+- `parley`, `hermes` — toolchain context
 
 Tags are searchable via the recall endpoint (just include the tag in
 the query string).

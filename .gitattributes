@@ -56,11 +56,11 @@ hindsight-data/.gitkeep                -filter -diff
 hermes-data/**                         filter=git-crypt diff=git-crypt
 hermes-data/.gitkeep                   -filter -diff
 
-# === Sidekick supplemental UI DB dump ===
+# === Parley supplemental UI DB dump ===
 # Contains conversation titles, pins, push subscriptions/preferences,
-# unread/activity state, VAPID keys, and Sidekick-facing message rows.
-sidekick-data/**                       filter=git-crypt diff=git-crypt
-sidekick-data/.gitkeep                 -filter -diff
+# unread/activity state, VAPID keys, and Parley-facing message rows.
+parley-data/**                       filter=git-crypt diff=git-crypt
+parley-data/.gitkeep                 -filter -diff
 
 # === Private workspace project data ===
 # Project-specific live/raw data for the agent's per-user tools. Curated

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Activate this host as the "active" host. Pulls the latest repo state,
-# optionally restores Hermes state, Sidekick UI state, and the hindsight bank,
+# optionally restores Hermes state, Parley UI state, and the hindsight bank,
 # starts services, claims ACTIVE_HOST, commits + pushes.
 #
 # Normal use: the previous active host has run handoff-out.sh, ACTIVE_HOST
@@ -16,12 +16,12 @@
 #      this host (idempotent re-run). Refuse otherwise unless --force.
 #   3. Stop local services so destructive restores cannot race writers.
 #   4. (Default yes) restore-hermes-state.sh --yes to replay sessions/messages.
-#   5. (Default yes) restore-sidekick-db.sh --yes to replay Sidekick titles,
+#   5. (Default yes) restore-parley-db.sh --yes to replay Parley titles,
 #      pins, push subscriptions, unread/activity state, and UI message rows.
 #   6. (Default yes) restore-hindsight-bank.sh --yes to replay the latest
 #      per-table memory snapshot into local pg0. Skipped with --no-restore.
 #   7. Start services in dependency order.
-#   8. Wait for /health on the core trio (gateway / hindsight / sidekick
+#   8. Wait for /health on the core trio (gateway / hindsight / parley
 #      adapter).
 #   9. Update ACTIVE_HOST to claim active.
 #   10. git add / commit / push.
@@ -31,8 +31,8 @@
 #   --no-restore      Skip both Hermes and Hindsight restore steps.
 #   --no-hermes-restore
 #                     Skip the Hermes SQLite restore.
-#   --no-sidekick-restore
-#                     Skip the Sidekick supplemental SQLite restore.
+#   --no-parley-restore
+#                     Skip the Parley supplemental SQLite restore.
 #   --no-hindsight-restore
 #                     Skip the Hindsight bank restore.
 #   --yes             Skip the prompt before destructive steps.
@@ -45,15 +45,15 @@ NOW="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 FORCE=0
 RESTORE_HERMES=1
-RESTORE_SIDEKICK=1
+RESTORE_PARLEY=1
 RESTORE_HINDSIGHT=1
 ASSUME_YES=0
 for arg in "$@"; do
   case "$arg" in
     --force) FORCE=1 ;;
-    --no-restore) RESTORE_HERMES=0; RESTORE_SIDEKICK=0; RESTORE_HINDSIGHT=0 ;;
+    --no-restore) RESTORE_HERMES=0; RESTORE_PARLEY=0; RESTORE_HINDSIGHT=0 ;;
     --no-hermes-restore) RESTORE_HERMES=0 ;;
-    --no-sidekick-restore) RESTORE_SIDEKICK=0 ;;
+    --no-parley-restore) RESTORE_PARLEY=0 ;;
     --no-hindsight-restore) RESTORE_HINDSIGHT=0 ;;
     --yes) ASSUME_YES=1 ;;
     -h|--help) sed -n '2,/^set -euo/p' "$0" | sed 's/^# \?//;$d'; exit 0 ;;
@@ -98,7 +98,7 @@ fi
 
 # --- 3. Stop local services before destructive restores -----------------
 say "stopping local services before restore..."
-for unit in whatsapp-bridge.service sidekick-audio.service sidekick.service \
+for unit in whatsapp-bridge.service parley-audio.service parley.service \
             hermes-gateway.service hermes-dashboard.service; do
   if systemctl --user list-unit-files --no-legend "${unit}" 2>/dev/null | grep -q "${unit}"; then
     systemctl --user stop "${unit}" 2>/dev/null || true
@@ -124,20 +124,20 @@ else
   say "skipping Hermes state restore"
 fi
 
-# --- 5. Restore Sidekick supplemental DB (default yes) ------------------
-if (( RESTORE_SIDEKICK )); then
-  if [[ -f "${REPO}/sidekick-data/sidekick.sql" ]]; then
-    say "restoring Sidekick supplemental DB from sidekick-data/sidekick.sql..."
+# --- 5. Restore Parley supplemental DB (default yes) ------------------
+if (( RESTORE_PARLEY )); then
+  if [[ -f "${REPO}/parley-data/parley.sql" ]]; then
+    say "restoring Parley supplemental DB from parley-data/parley.sql..."
     if (( ASSUME_YES )); then
-      "${REPO}/scripts/restore-sidekick-db.sh" --yes
+      "${REPO}/scripts/restore-parley-db.sh" --yes
     else
-      "${REPO}/scripts/restore-sidekick-db.sh"
+      "${REPO}/scripts/restore-parley-db.sh"
     fi
   else
-    warn "no sidekick-data/sidekick.sql — skipping Sidekick DB restore (fresh install or git-crypt locked?)"
+    warn "no parley-data/parley.sql — skipping Parley DB restore (fresh install or git-crypt locked?)"
   fi
 else
-  say "skipping Sidekick supplemental DB restore"
+  say "skipping Parley supplemental DB restore"
 fi
 
 # --- 6. Restore hindsight bank (default yes) ----------------------------
@@ -157,14 +157,14 @@ else
 fi
 
 # --- 7. (Re)install symlinked units, enable, + start --------------------
-# Some units are installed via symlink from the sidekick repo. If a
+# Some units are installed via symlink from the parley repo. If a
 # previous handoff-out disabled those, the symlink may have been
 # removed. Re-link before enable so the unit is loadable.
 say "(re)installing symlinked units..."
 SYSTEMD_USER="${HOME}/.config/systemd/user"
 mkdir -p "${SYSTEMD_USER}"
-ln -sfn "${HOME}/code/sidekick/audio-bridge/sidekick-audio.service" \
-        "${SYSTEMD_USER}/sidekick-audio.service" 2>/dev/null || true
+ln -sfn "${HOME}/code/parley/audio-bridge/parley-audio.service" \
+        "${SYSTEMD_USER}/parley-audio.service" 2>/dev/null || true
 systemctl --user daemon-reload
 
 say "ensuring repo-backed Hermes cron state is linked..."
@@ -200,7 +200,7 @@ add_cron "doctor.sh"                  "*/10 * * * * ${REPO}/scripts/doctor.sh >>
 add_cron "sync-hermes.sh"             "*/15 * * * * ${REPO}/scripts/sync-hermes.sh >> ${HOME}/.hermes/logs/sync-hermes.log 2>&1"
 add_cron "sync-cc-history.sh"         "*/15 * * * * ${REPO}/scripts/sync-cc-history.sh >> ${HOME}/.hermes/logs/sync-cc-history.log 2>&1"
 add_cron "sync-hermes-state.sh"       "44 3 * * * ${REPO}/scripts/sync-hermes-state.sh >> ${HOME}/.hermes/logs/sync-hermes-state.log 2>&1"
-add_cron "sync-sidekick-db.sh"        "49 3 * * * ${REPO}/scripts/sync-sidekick-db.sh >> ${HOME}/.hermes/logs/sync-sidekick-db.log 2>&1"
+add_cron "sync-parley-db.sh"        "49 3 * * * ${REPO}/scripts/sync-parley-db.sh >> ${HOME}/.hermes/logs/sync-parley-db.log 2>&1"
 add_cron "sync-hindsight-bank.sh"     "33 3 * * * ${REPO}/scripts/sync-hindsight-bank.sh >> ${HOME}/.hermes/logs/sync-hindsight-bank.log 2>&1"
 add_cron "prune-claude-cc-history.sh" "44 4 * * * ${REPO}/scripts/prune-claude-cc-history.sh >> ${HOME}/.hermes/logs/prune-claude-cc-history.log 2>&1"
 
@@ -214,7 +214,7 @@ if systemctl --user list-unit-files --no-legend hindsight-server.service 2>/dev/
 fi
 
 for unit in hermes-gateway.service hermes-dashboard.service \
-            sidekick.service sidekick-audio.service whatsapp-bridge.service; do
+            parley.service parley-audio.service whatsapp-bridge.service; do
   if systemctl --user list-unit-files --no-legend "${unit}" 2>/dev/null | grep -q "${unit}"; then
     systemctl --user enable "${unit}" 2>/dev/null || true
     systemctl --user start "${unit}" 2>/dev/null && ok "started ${unit}" || warn "failed to start ${unit} — check journalctl"
@@ -226,7 +226,7 @@ say "waiting for /health endpoints..."
 for endpoint in \
     "hindsight 8765" \
     "gateway   8642" \
-    "sidekick  8645"; do
+    "parley  8645"; do
   read -r name port <<< "${endpoint}"
   for _ in $(seq 1 30); do
     if curl -fsS "http://127.0.0.1:${port}/health" >/dev/null 2>&1; then
@@ -282,6 +282,6 @@ ok "handoff-in complete on ${HOSTNAME}"
 echo
 echo "Sanity checks you may want to run:"
 echo "    curl http://127.0.0.1:8642/health    # hermes gateway"
-echo "    curl http://127.0.0.1:8645/health    # sidekick adapter"
+echo "    curl http://127.0.0.1:8645/health    # parley adapter"
 echo "    curl http://127.0.0.1:8765/health    # hindsight"
 echo "    journalctl --user -u hermes-gateway.service -n 30"

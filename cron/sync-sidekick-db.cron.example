@@ -1,5 +1,0 @@
-# Daily encrypted Sidekick supplemental UI DB dump.
-# Replace REPO_PATH with your clone path and install with `crontab -e`.
-#
-# Only the ACTIVE_HOST writes; standby hosts exit without committing.
-49 3 * * * REPO_PATH/scripts/sync-sidekick-db.sh >> $HOME/.hermes/logs/sync-sidekick-db.log 2>&1

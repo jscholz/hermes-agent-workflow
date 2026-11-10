@@ -20,10 +20,10 @@ Environment=HERMES_ACCEPT_HOOKS=1
 # point the bundled source at the same tree so service startup does not
 # rewrite the checkout just because upstream Hermes moved.
 Environment=HERMES_BUNDLED_SKILLS=%h/.hermes/skills
-# Sidekick is integrated through the Hermes plugin shipped in the
-# sidekick repo. Keep plugin/proxy ownership flags in sync.
-Environment=SIDEKICK_PUSH_OWNED_BY_PLUGIN=true
-Environment=SIDEKICK_INFLIGHT_OWNED_BY_PLUGIN=true
+# Parley is integrated through the Hermes plugin shipped in the
+# parley repo. Keep plugin/proxy ownership flags in sync.
+Environment=PARLEY_PUSH_OWNED_BY_PLUGIN=true
+Environment=PARLEY_INFLIGHT_OWNED_BY_PLUGIN=true
 
 [Install]
 WantedBy=default.target

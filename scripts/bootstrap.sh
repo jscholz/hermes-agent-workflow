@@ -7,8 +7,8 @@
 # detect existing state and skip done work.
 #
 # WHY a wizard rather than a README:
-#   The hermes+sidekick stack has 3 venvs, 3 systemd units, an .env
-#   secrets file, a config-symlink layout, and a sidekick clone in a
+#   The hermes+parley stack has 3 venvs, 3 systemd units, an .env
+#   secrets file, a config-symlink layout, and a parley clone in a
 #   sibling directory. A README would 90%-misfire for any given user;
 #   a wizard prompts for the load-bearing values and silently chooses
 #   sane defaults for the rest.
@@ -55,17 +55,17 @@ Usage: bootstrap.sh [--unattended] [--env-file <path>]
 
 Recognized variables (set via env or env-file):
   HOST_NAME              host name; default: hostname -s
-  SIDEKICK_PATH          sidekick clone path; default: ~/code/sidekick
-  SIDEKICK_TLS_DIR       fallback HTTPS cert/key dir; default: ~/.local/share/sidekick/tls
+  PARLEY_PATH          parley clone path; default: ~/code/parley
+  PARLEY_TLS_DIR       fallback HTTPS cert/key dir; default: ~/.local/share/parley/tls
   HERMES_HOME            hermes home; default: ~/.hermes
   AGENT_LAT, AGENT_LON   ambient weather coords; optional
   OPENAI_API_KEY         required (unless ~/.hermes/.env already has it)
   DEEPGRAM_API_KEY       optional (voice STT; unless ~/.hermes/.env already has it)
   OPENROUTER_API_KEY     optional alternate LLM provider key
   TAVILY_API_KEY         optional (enables web_search tool); skip with empty value
-  INSTALL_SIDEKICK_AUDIO_BRIDGE
-                         auto by default; installs when sidekick/audio-bridge exists
-  INSTALL_SIDEKICK_AUDIO_BARGE_VAD
+  INSTALL_PARLEY_AUDIO_BRIDGE
+                         auto by default; installs when parley/audio-bridge exists
+  INSTALL_PARLEY_AUDIO_BARGE_VAD
                          auto by default; skips heavy Silero/Torch deps on ARM
                          unless set to 1
 EOF
@@ -128,7 +128,7 @@ if (( PY_MAJ < 3 || (PY_MAJ == 3 && PY_MIN < 11) )); then
 fi
 ok "python3 ${PY_VER}"
 
-# Node 20+ check. Sidekick proxy uses experimental TypeScript stripping
+# Node 20+ check. Parley proxy uses experimental TypeScript stripping
 # (--experimental-strip-types) which lands stably in Node 22, but is
 # usable from 20+. We do not pin a specific minor — whatever the user
 # has on PATH that is >=20 works. If you need a managed Node, install
@@ -139,7 +139,7 @@ fi
 NODE_VER="$(node -v 2>/dev/null | sed 's/^v//')"
 NODE_MAJ="${NODE_VER%%.*}"
 if (( NODE_MAJ < 20 )); then
-  fail "node is v${NODE_VER}, need >=20 for the sidekick proxy. Upgrade (e.g. via nvm: 'nvm install 22 && nvm use 22')."
+  fail "node is v${NODE_VER}, need >=20 for the parley proxy. Upgrade (e.g. via nvm: 'nvm install 22 && nvm use 22')."
 fi
 ok "node v${NODE_VER}"
 
@@ -151,8 +151,15 @@ section "Configuration"
 
 ENV_FILE_DEFAULT="${HOME}/.hermes/.env"
 HERMES_HOME_DEFAULT="${HOME}/.hermes"
-SIDEKICK_PATH_DEFAULT="${HOME}/code/sidekick"
-SIDEKICK_TLS_DIR_DEFAULT="${HOME}/.local/share/sidekick/tls"
+PARLEY_PATH_DEFAULT="${HOME}/code/parley"
+PARLEY_TLS_DIR_DEFAULT="${HOME}/.local/share/parley/tls"
+
+# Secrets pasted from a browser or a chat can carry zero-width spaces,
+# BOMs, CRs and other non-printables; hermes strips and warns, Hindsight
+# does not (field report 2026-11-10, D3). Scrub before anything is written.
+sanitize_secret() {
+  printf '%s' "$1" | LC_ALL=C.UTF-8 sed -e 's/\xe2\x80\x8b//g; s/\xe2\x80\x8c//g; s/\xe2\x80\x8d//g; s/\xef\xbb\xbf//g; s/\xe2\x80\xa8//g' | tr -d '\r\n\t\000-\010\013\014\016-\037\177'
+}
 
 prompt_default() {
   # prompt_default <var-name> <prompt-text> <default> [--required]
@@ -227,8 +234,8 @@ prompt_secret() {
 
 # Non-secret prompts
 prompt_default HOST_NAME      "host name (used for hosts/<host>/ + systemd units)" "$(hostname -s)"
-prompt_default SIDEKICK_PATH  "sidekick clone path" "${SIDEKICK_PATH_DEFAULT}"
-prompt_default SIDEKICK_TLS_DIR "Sidekick fallback HTTPS cert/key directory" "${SIDEKICK_TLS_DIR_DEFAULT}"
+prompt_default PARLEY_PATH  "parley clone path" "${PARLEY_PATH_DEFAULT}"
+prompt_default PARLEY_TLS_DIR "Parley fallback HTTPS cert/key directory" "${PARLEY_TLS_DIR_DEFAULT}"
 prompt_default HERMES_HOME    "hermes home directory" "${HERMES_HOME_DEFAULT}"
 prompt_default AGENT_LAT      "agent latitude (for ambient weather widget, optional)" ""
 prompt_default AGENT_LON      "agent longitude (for ambient weather widget, optional)" ""
@@ -246,136 +253,137 @@ prompt_secret  OPENROUTER_API_KEY  "OpenRouter API key (optional alternate LLM p
 # hermes via TAVILY_API_KEY; absent → tool not registered.
 prompt_secret  TAVILY_API_KEY      "Tavily API key (for web_search, optional)"
 
-# ── 3. Sidekick clone ────────────────────────────────────────────────
+# ── 3. Parley clone ────────────────────────────────────────────────
 # The PWA + audio bridge live in a separate public repo. We clone as a
 # sibling directory rather than as a submodule so the user can pull
 # updates independently of the workflow framework version.
-section "Sidekick"
+section "Parley"
 
-if [[ -d "${SIDEKICK_PATH}/.git" ]]; then
-  ok "found existing sidekick at ${SIDEKICK_PATH}, skipping clone"
-elif [[ -e "${SIDEKICK_PATH}" ]]; then
-  fail "${SIDEKICK_PATH} exists but is not a git repo — refusing to clobber. Move it aside or pick a different SIDEKICK_PATH."
+if [[ -d "${PARLEY_PATH}/.git" ]]; then
+  ok "found existing parley at ${PARLEY_PATH}, skipping clone"
+elif [[ -e "${PARLEY_PATH}" ]]; then
+  fail "${PARLEY_PATH} exists but is not a git repo — refusing to clobber. Move it aside or pick a different PARLEY_PATH."
 else
-  info "cloning sidekick → ${SIDEKICK_PATH}"
-  mkdir -p "$(dirname "${SIDEKICK_PATH}")"
-  git clone https://github.com/jscholz/sidekick "${SIDEKICK_PATH}"
-  ok "sidekick cloned"
+  info "cloning parley → ${PARLEY_PATH}"
+  mkdir -p "$(dirname "${PARLEY_PATH}")"
+  git clone https://github.com/jscholz/parley "${PARLEY_PATH}"
+  ok "parley cloned"
 fi
 
-if [[ -f "${SIDEKICK_PATH}/package.json" ]]; then
-  if [[ -d "${SIDEKICK_PATH}/node_modules" ]]; then
-    ok "sidekick Node dependencies already installed"
-  elif [[ -f "${SIDEKICK_PATH}/package-lock.json" ]]; then
-    info "installing sidekick Node dependencies with npm ci"
-    (cd "${SIDEKICK_PATH}" && npm ci)
-    ok "sidekick Node dependencies installed"
+if [[ -f "${PARLEY_PATH}/package.json" ]]; then
+  if [[ -d "${PARLEY_PATH}/node_modules" ]]; then
+    ok "parley Node dependencies already installed"
+  elif [[ -f "${PARLEY_PATH}/package-lock.json" ]]; then
+    info "installing parley Node dependencies with npm ci"
+    (cd "${PARLEY_PATH}" && npm ci)
+    ok "parley Node dependencies installed"
   else
-    info "installing sidekick Node dependencies with npm install"
-    (cd "${SIDEKICK_PATH}" && npm install)
-    ok "sidekick Node dependencies installed"
+    info "installing parley Node dependencies with npm install"
+    (cd "${PARLEY_PATH}" && npm install)
+    ok "parley Node dependencies installed"
   fi
 else
-  warn "sidekick package.json not found at ${SIDEKICK_PATH} — service start will likely fail"
+  warn "parley package.json not found at ${PARLEY_PATH} — service start will likely fail"
 fi
 
-# Sidekick voice capture, push, PWA install behavior, and WebRTC require
+# Parley voice capture, push, PWA install behavior, and WebRTC require
 # a browser secure context when the UI is opened from another device.
 # Prefer Tailscale Serve: it gives a trusted
-# https://<host>.<tailnet>.ts.net:3001/ URL and keeps Sidekick itself
+# https://<host>.<tailnet>.ts.net:3001/ URL and keeps Parley itself
 # on local HTTP. Self-signed HTTPS is no longer the default because it
 # looks like a working install while browsers still show "Not Secure";
-# opt into that fallback explicitly with SIDEKICK_ALLOW_SELF_SIGNED_FALLBACK=1.
-section "Sidekick HTTPS"
+# opt into that fallback explicitly with PARLEY_ALLOW_SELF_SIGNED_FALLBACK=1.
+section "Parley HTTPS"
 
-SIDEKICK_ENV_FILE="${SIDEKICK_PATH}/.env"
-touch "${SIDEKICK_ENV_FILE}"
-chmod 600 "${SIDEKICK_ENV_FILE}"
-write_sidekick_env() {
+PARLEY_ENV_FILE="${PARLEY_PATH}/.env"
+touch "${PARLEY_ENV_FILE}"
+chmod 600 "${PARLEY_ENV_FILE}"
+write_parley_env() {
   local key="$1" val="$2" tmp
-  if grep -qE "^${key}=" "${SIDEKICK_ENV_FILE}"; then
-    tmp="${SIDEKICK_ENV_FILE}.tmp"
-    sed "s|^${key}=.*|${key}=${val}|" "${SIDEKICK_ENV_FILE}" > "${tmp}"
-    mv "${tmp}" "${SIDEKICK_ENV_FILE}"
+  val="$(sanitize_secret "${val}")"
+  if grep -qE "^${key}=" "${PARLEY_ENV_FILE}"; then
+    tmp="${PARLEY_ENV_FILE}.tmp"
+    sed "s|^${key}=.*|${key}=${val}|" "${PARLEY_ENV_FILE}" > "${tmp}"
+    mv "${tmp}" "${PARLEY_ENV_FILE}"
   else
-    printf '%s=%s\n' "${key}" "${val}" >> "${SIDEKICK_ENV_FILE}"
+    printf '%s=%s\n' "${key}" "${val}" >> "${PARLEY_ENV_FILE}"
   fi
-  chmod 600 "${SIDEKICK_ENV_FILE}"
+  chmod 600 "${PARLEY_ENV_FILE}"
 }
-unset_sidekick_env() {
+unset_parley_env() {
   local key="$1" tmp
-  if grep -qE "^${key}=" "${SIDEKICK_ENV_FILE}"; then
-    tmp="${SIDEKICK_ENV_FILE}.tmp"
-    grep -vE "^${key}=" "${SIDEKICK_ENV_FILE}" > "${tmp}"
-    mv "${tmp}" "${SIDEKICK_ENV_FILE}"
-    chmod 600 "${SIDEKICK_ENV_FILE}"
+  if grep -qE "^${key}=" "${PARLEY_ENV_FILE}"; then
+    tmp="${PARLEY_ENV_FILE}.tmp"
+    grep -vE "^${key}=" "${PARLEY_ENV_FILE}" > "${tmp}"
+    mv "${tmp}" "${PARLEY_ENV_FILE}"
+    chmod 600 "${PARLEY_ENV_FILE}"
   fi
 }
 
-SIDEKICK_LOCAL_SCHEME="http"
-SIDEKICK_ALLOW_SELF_SIGNED_FALLBACK="${SIDEKICK_ALLOW_SELF_SIGNED_FALLBACK:-0}"
+PARLEY_LOCAL_SCHEME="http"
+PARLEY_ALLOW_SELF_SIGNED_FALLBACK="${PARLEY_ALLOW_SELF_SIGNED_FALLBACK:-0}"
 TAILSCALE_DNS=""
 if command -v tailscale >/dev/null 2>&1; then
   TAILSCALE_DNS="$(tailscale status --json 2>/dev/null | python3 -c 'import sys,json; data=json.load(sys.stdin); print(data.get("Self",{}).get("DNSName","").rstrip("."))' 2>/dev/null || true)"
   if [[ -n "${TAILSCALE_DNS}" ]]; then
     if tailscale serve --bg --https=3001 http://127.0.0.1:3001 >/dev/null 2>&1; then
-      unset_sidekick_env SIDEKICK_HTTPS_CERT_FILE
-      unset_sidekick_env SIDEKICK_HTTPS_KEY_FILE
+      unset_parley_env PARLEY_HTTPS_CERT_FILE
+      unset_parley_env PARLEY_HTTPS_KEY_FILE
       ok "configured Tailscale Serve: https://${TAILSCALE_DNS}:3001/ → http://127.0.0.1:3001"
-      warn "Tailscale Serve is tailnet-only, not user-only. Restrict ${HOST_NAME}:3001 in the tailnet ACL if this agent must be Jon-only."
+      warn "Tailscale Serve is tailnet-only, not user-only. Restrict ${HOST_NAME}:3001 in the tailnet ACL if this agent must be owner-only."
     elif sudo -n tailscale set --operator="${USER}" >/dev/null 2>&1 \
       && tailscale serve --bg --https=3001 http://127.0.0.1:3001 >/dev/null 2>&1; then
-      unset_sidekick_env SIDEKICK_HTTPS_CERT_FILE
-      unset_sidekick_env SIDEKICK_HTTPS_KEY_FILE
+      unset_parley_env PARLEY_HTTPS_CERT_FILE
+      unset_parley_env PARLEY_HTTPS_KEY_FILE
       ok "configured Tailscale Serve: https://${TAILSCALE_DNS}:3001/ → http://127.0.0.1:3001"
-      warn "Tailscale Serve is tailnet-only, not user-only. Restrict ${HOST_NAME}:3001 in the tailnet ACL if this agent must be Jon-only."
+      warn "Tailscale Serve is tailnet-only, not user-only. Restrict ${HOST_NAME}:3001 in the tailnet ACL if this agent must be owner-only."
     else
       warn "Tailscale Serve could not be configured without a password."
       warn "Run once, then re-run bootstrap: sudo tailscale set --operator=${USER}"
-      SIDEKICK_LOCAL_SCHEME="http"
+      PARLEY_LOCAL_SCHEME="http"
     fi
   else
-    warn "Tailscale is installed but this node has no MagicDNS name; Sidekick will stay local HTTP"
-    SIDEKICK_LOCAL_SCHEME="http"
+    warn "Tailscale is installed but this node has no MagicDNS name; Parley will stay local HTTP"
+    PARLEY_LOCAL_SCHEME="http"
   fi
 else
-  warn "tailscale not found; Sidekick will stay local HTTP"
-  SIDEKICK_LOCAL_SCHEME="http"
+  warn "tailscale not found; Parley will stay local HTTP"
+  PARLEY_LOCAL_SCHEME="http"
 fi
 
-if [[ "${SIDEKICK_LOCAL_SCHEME}" == "http" ]]; then
-  unset_sidekick_env SIDEKICK_HTTPS_CERT_FILE
-  unset_sidekick_env SIDEKICK_HTTPS_KEY_FILE
+if [[ "${PARLEY_LOCAL_SCHEME}" == "http" ]]; then
+  unset_parley_env PARLEY_HTTPS_CERT_FILE
+  unset_parley_env PARLEY_HTTPS_KEY_FILE
 fi
 
-if [[ "${SIDEKICK_LOCAL_SCHEME}" == "http" && "${SIDEKICK_ALLOW_SELF_SIGNED_FALLBACK}" == "1" ]]; then
-  SIDEKICK_LOCAL_SCHEME="https"
+if [[ "${PARLEY_LOCAL_SCHEME}" == "http" && "${PARLEY_ALLOW_SELF_SIGNED_FALLBACK}" == "1" ]]; then
+  PARLEY_LOCAL_SCHEME="https"
 fi
 
-if [[ "${SIDEKICK_LOCAL_SCHEME}" == "https" ]]; then
-  mkdir -p "${SIDEKICK_TLS_DIR}"
-  chmod 700 "${SIDEKICK_TLS_DIR}"
-  SIDEKICK_CERT_FILE="${SIDEKICK_TLS_DIR}/sidekick.crt"
-  SIDEKICK_KEY_FILE="${SIDEKICK_TLS_DIR}/sidekick.key"
-  if [[ -f "${SIDEKICK_CERT_FILE}" && -f "${SIDEKICK_KEY_FILE}" ]]; then
-    ok "Sidekick fallback TLS cert/key already exist in ${SIDEKICK_TLS_DIR}"
+if [[ "${PARLEY_LOCAL_SCHEME}" == "https" ]]; then
+  mkdir -p "${PARLEY_TLS_DIR}"
+  chmod 700 "${PARLEY_TLS_DIR}"
+  PARLEY_CERT_FILE="${PARLEY_TLS_DIR}/parley.crt"
+  PARLEY_KEY_FILE="${PARLEY_TLS_DIR}/parley.key"
+  if [[ -f "${PARLEY_CERT_FILE}" && -f "${PARLEY_KEY_FILE}" ]]; then
+    ok "Parley fallback TLS cert/key already exist in ${PARLEY_TLS_DIR}"
   else
     SAN="DNS:${HOST_NAME},DNS:${HOST_NAME}.local,IP:127.0.0.1"
     ts_ip="$(tailscale ip -4 2>/dev/null | head -n1 || true)"
     [[ -n "${ts_ip}" ]] && SAN="${SAN},IP:${ts_ip}"
     [[ -n "${TAILSCALE_DNS}" ]] && SAN="${SAN},DNS:${TAILSCALE_DNS}"
-    info "generating Sidekick self-signed HTTPS certificate"
+    info "generating Parley self-signed HTTPS certificate"
     openssl req -x509 -newkey rsa:2048 -nodes -days 825 \
-      -keyout "${SIDEKICK_KEY_FILE}" \
-      -out "${SIDEKICK_CERT_FILE}" \
+      -keyout "${PARLEY_KEY_FILE}" \
+      -out "${PARLEY_CERT_FILE}" \
       -subj "/CN=${HOST_NAME}" \
       -addext "subjectAltName=${SAN}" >/dev/null 2>&1
-    chmod 600 "${SIDEKICK_CERT_FILE}" "${SIDEKICK_KEY_FILE}"
-    ok "generated ${SIDEKICK_CERT_FILE}"
+    chmod 600 "${PARLEY_CERT_FILE}" "${PARLEY_KEY_FILE}"
+    ok "generated ${PARLEY_CERT_FILE}"
   fi
-  write_sidekick_env SIDEKICK_HTTPS_CERT_FILE "${SIDEKICK_CERT_FILE}"
-  write_sidekick_env SIDEKICK_HTTPS_KEY_FILE "${SIDEKICK_KEY_FILE}"
-  ok "configured Sidekick self-signed HTTPS fallback in ${SIDEKICK_ENV_FILE}"
+  write_parley_env PARLEY_HTTPS_CERT_FILE "${PARLEY_CERT_FILE}"
+  write_parley_env PARLEY_HTTPS_KEY_FILE "${PARLEY_KEY_FILE}"
+  ok "configured Parley self-signed HTTPS fallback in ${PARLEY_ENV_FILE}"
 fi
 
 # ── 4. Symlink layout ────────────────────────────────────────────────
@@ -510,7 +518,20 @@ link_dir "memories"           "memories"
 link_dir "skills"             "skills"
 link_dir "cron"               "cron"
 link_dir "hooks"              "hooks"
-link_dir "plugins"            "plugins"
+# plugins/ is a REAL directory, not a link into the repo. PM-managed
+# hermes (2026-09+) refuses `hermes plugins install` into a plugins dir
+# that resolves outside HERMES_HOME ("plugin publication paths escape or
+# overlap their home"), which blocked the hindsight memory provider on a
+# fresh install (field report 2026-11-10, C2). Locally developed plugins
+# (parley) are linked INSIDE it below; catalog installs land beside them
+# as real dirs and are reproducible with `hermes plugins install <name>`.
+PLUGINS_DIR="${HERMES_HOME}/plugins"
+if [[ -L "${PLUGINS_DIR}" ]]; then
+  rm "${PLUGINS_DIR}"
+  warn "replaced the plugins/ symlink with a real directory (catalog plugins could not install into a link)"
+fi
+mkdir -p "${PLUGINS_DIR}"
+ok "${PLUGINS_DIR}/ is a real directory"
 # ~/.hermes/scripts hosts agent-runtime callables — cron-driven Python
 # scripts and skill helpers. Symlinking means any script the agent
 # (or you) drops there lands in your fork automatically and survives
@@ -545,7 +566,7 @@ link_secret "google_token.json"          "google_token.json"
 #                   (so apply-patches.sh has a real repo to mutate; a
 #                   PyPI install would be unmodifiable).
 #   - hindsight:    pip install hindsight-api-slim from PyPI.
-#   - audio-bridge: requirements.txt in the sidekick repo.
+#   - audio-bridge: requirements.txt in the parley repo.
 section "Python environments"
 
 ensure_venv() {
@@ -610,10 +631,10 @@ fi
 info "installing ${HERMES_AGENT_REPO} (editable) into ${HERMES_VENV}"
 uv pip install --python "${HERMES_VENV}/bin/python" -e "${HERMES_AGENT_REPO}"
 
-# Dashboard and Sidekick plugin dependencies are not always pulled in by
+# Dashboard and Parley plugin dependencies are not always pulled in by
 # the base hermes editable install. Install them explicitly so the
 # systemd services work on a bare server image.
-info "installing dashboard + sidekick plugin dependencies into ${HERMES_VENV}"
+info "installing dashboard + parley plugin dependencies into ${HERMES_VENV}"
 uv pip install --python "${HERMES_VENV}/bin/python" fastapi uvicorn py-vapid pywebpush websockets
 
 # Several hermes helper paths and older doctor scripts expect the venv
@@ -623,6 +644,13 @@ HERMES_AGENT_VENV_LINK="${HERMES_AGENT_REPO}/venv"
 if [[ -L "${HERMES_AGENT_VENV_LINK}" || ! -e "${HERMES_AGENT_VENV_LINK}" ]]; then
   ln -sfn "${HERMES_VENV}" "${HERMES_AGENT_VENV_LINK}"
   ok "linked ${HERMES_AGENT_VENV_LINK} → ${HERMES_VENV}"
+  # upstream's .gitignore has `/venv/`, which matches a directory but not
+  # this symlink — so the clone reads as dirty (`?? venv`) and
+  # apply-patches.sh refuses (field report 2026-11-10, A1). Exclude it
+  # locally; .git/info/exclude is never pushed.
+  if ! grep -qxF "/venv" "${HERMES_AGENT_REPO}/.git/info/exclude" 2>/dev/null; then
+    echo "/venv" >> "${HERMES_AGENT_REPO}/.git/info/exclude"
+  fi
 else
   warn "${HERMES_AGENT_VENV_LINK} exists and is not a symlink — leaving as-is"
 fi
@@ -643,45 +671,47 @@ if [[ -L "${HERMES_HOME}/hindsight-server-venv" || ! -e "${HERMES_HOME}/hindsigh
   ok "linked ${HERMES_HOME}/hindsight-server-venv → ${HERMES_HOME}/hindsight-venv"
 fi
 
-# Audio bridge: lives inside sidekick repo; uv venv created in-place.
-AUDIO_BRIDGE_DIR="${SIDEKICK_PATH}/audio-bridge"
-INSTALL_SIDEKICK_AUDIO_BRIDGE="${INSTALL_SIDEKICK_AUDIO_BRIDGE:-auto}"
-INSTALL_SIDEKICK_AUDIO_BARGE_VAD="${INSTALL_SIDEKICK_AUDIO_BARGE_VAD:-auto}"
-SIDEKICK_AUDIO_ENABLED=0
-case "${INSTALL_SIDEKICK_AUDIO_BRIDGE}" in
-  1|true|TRUE|yes|YES) SIDEKICK_AUDIO_ENABLED=1 ;;
-  0|false|FALSE|no|NO) SIDEKICK_AUDIO_ENABLED=0 ;;
-  auto) SIDEKICK_AUDIO_ENABLED=1 ;;
-  *) warn "unknown INSTALL_SIDEKICK_AUDIO_BRIDGE=${INSTALL_SIDEKICK_AUDIO_BRIDGE}; defaulting to disabled" ;;
+# Audio bridge: lives inside parley repo; uv venv created in-place.
+AUDIO_BRIDGE_DIR="${PARLEY_PATH}/audio-bridge"
+INSTALL_PARLEY_AUDIO_BRIDGE="${INSTALL_PARLEY_AUDIO_BRIDGE:-auto}"
+INSTALL_PARLEY_AUDIO_BARGE_VAD="${INSTALL_PARLEY_AUDIO_BARGE_VAD:-auto}"
+PARLEY_AUDIO_ENABLED=0
+case "${INSTALL_PARLEY_AUDIO_BRIDGE}" in
+  1|true|TRUE|yes|YES) PARLEY_AUDIO_ENABLED=1 ;;
+  0|false|FALSE|no|NO) PARLEY_AUDIO_ENABLED=0 ;;
+  auto) PARLEY_AUDIO_ENABLED=1 ;;
+  *) warn "unknown INSTALL_PARLEY_AUDIO_BRIDGE=${INSTALL_PARLEY_AUDIO_BRIDGE}; defaulting to disabled" ;;
 esac
-if [[ -d "${AUDIO_BRIDGE_DIR}" && "${SIDEKICK_AUDIO_ENABLED}" == "1" ]]; then
-  SIDEKICK_AUDIO_BARGE_VAD_ENABLED=0
-  case "${INSTALL_SIDEKICK_AUDIO_BARGE_VAD}" in
-    1|true|TRUE|yes|YES) SIDEKICK_AUDIO_BARGE_VAD_ENABLED=1 ;;
-    0|false|FALSE|no|NO) SIDEKICK_AUDIO_BARGE_VAD_ENABLED=0 ;;
+if [[ -d "${AUDIO_BRIDGE_DIR}" && "${PARLEY_AUDIO_ENABLED}" == "1" ]]; then
+  PARLEY_AUDIO_BARGE_VAD_ENABLED=0
+  case "${INSTALL_PARLEY_AUDIO_BARGE_VAD}" in
+    1|true|TRUE|yes|YES) PARLEY_AUDIO_BARGE_VAD_ENABLED=1 ;;
+    0|false|FALSE|no|NO) PARLEY_AUDIO_BARGE_VAD_ENABLED=0 ;;
     auto)
       case "$(uname -m)" in
-        arm64|aarch64|armv*) SIDEKICK_AUDIO_BARGE_VAD_ENABLED=0 ;;
-        *) SIDEKICK_AUDIO_BARGE_VAD_ENABLED=1 ;;
+        arm64|aarch64|armv*) PARLEY_AUDIO_BARGE_VAD_ENABLED=0 ;;
+        *) PARLEY_AUDIO_BARGE_VAD_ENABLED=1 ;;
       esac
       ;;
-    *) warn "unknown INSTALL_SIDEKICK_AUDIO_BARGE_VAD=${INSTALL_SIDEKICK_AUDIO_BARGE_VAD}; defaulting to disabled" ;;
+    *) warn "unknown INSTALL_PARLEY_AUDIO_BARGE_VAD=${INSTALL_PARLEY_AUDIO_BARGE_VAD}; defaulting to disabled" ;;
   esac
 
   audio_requirements="${AUDIO_BRIDGE_DIR}/requirements.txt"
   audio_requirements_tmp=""
-  if [[ "${SIDEKICK_AUDIO_BARGE_VAD_ENABLED}" != "1" ]]; then
+  if [[ "${PARLEY_AUDIO_BARGE_VAD_ENABLED}" != "1" ]]; then
     audio_requirements_tmp="$(mktemp)"
     grep -v -E '^silero-vad([<>= ].*)?$' "${audio_requirements}" > "${audio_requirements_tmp}"
     audio_requirements="${audio_requirements_tmp}"
-    warn "installing sidekick audio bridge without silero-vad; bridge STT/TTS works, bridge-side barge VAD is disabled"
+    warn "installing parley audio bridge without silero-vad; bridge STT/TTS works, bridge-side barge VAD is disabled"
   fi
 
   info "installing audio-bridge dependencies"
-  (cd "${AUDIO_BRIDGE_DIR}" && uv venv && uv pip install -r "${audio_requirements}")
+  # Re-runs must be safe: recent uv refuses to overwrite an existing venv
+  # (field report 2026-11-10, A2), so only create it when it is missing.
+  (cd "${AUDIO_BRIDGE_DIR}" && { [[ -x .venv/bin/python ]] || uv venv; } && uv pip install --python .venv/bin/python -r "${audio_requirements}")
   [[ -n "${audio_requirements_tmp}" ]] && rm -f "${audio_requirements_tmp}"
 elif [[ -d "${AUDIO_BRIDGE_DIR}" ]]; then
-  warn "skipping sidekick audio bridge on this host. Set INSTALL_SIDEKICK_AUDIO_BRIDGE=1 to install it explicitly."
+  warn "skipping parley audio bridge on this host. Set INSTALL_PARLEY_AUDIO_BRIDGE=1 to install it explicitly."
 else
   warn "audio-bridge dir not found at ${AUDIO_BRIDGE_DIR} — skipping"
 fi
@@ -709,41 +739,62 @@ else
   warn "${HERMES_VENV} not present — skip hindsight-client install"
 fi
 
-# ── 5c. Sidekick hermes plugin ───────────────────────────────────────
-# Sidekick's current Hermes integration is a first-class plugin under
-# the sidekick checkout. No core hermes patch should be needed for a
+# ── 5c. Parley hermes plugin ───────────────────────────────────────
+# Parley's current Hermes integration is a first-class plugin under
+# the parley checkout. No core hermes patch should be needed for a
 # fresh install; expose the plugin through ~/.hermes/plugins and make
 # sure the default config enables it.
-section "Sidekick Hermes plugin"
+section "Parley Hermes plugin"
 
-SIDEKICK_PLUGIN_SRC="${SIDEKICK_PATH}/backends/hermes/plugin"
-SIDEKICK_PLUGIN_DST="${HERMES_HOME}/plugins/sidekick"
-if [[ -d "${SIDEKICK_PLUGIN_SRC}" ]]; then
-  mkdir -p "$(dirname "${SIDEKICK_PLUGIN_DST}")"
-  if [[ -L "${SIDEKICK_PLUGIN_DST}" || ! -e "${SIDEKICK_PLUGIN_DST}" ]]; then
-    ln -sfn "${SIDEKICK_PLUGIN_SRC}" "${SIDEKICK_PLUGIN_DST}"
-    ok "linked ${SIDEKICK_PLUGIN_DST} → ${SIDEKICK_PLUGIN_SRC}"
+PARLEY_PLUGIN_SRC="${PARLEY_PATH}/backends/hermes/plugin"
+PARLEY_PLUGIN_DST="${HERMES_HOME}/plugins/parley"
+if [[ -d "${PARLEY_PLUGIN_SRC}" ]]; then
+  mkdir -p "$(dirname "${PARLEY_PLUGIN_DST}")"
+  if [[ -L "${PARLEY_PLUGIN_DST}" || ! -e "${PARLEY_PLUGIN_DST}" ]]; then
+    ln -sfn "${PARLEY_PLUGIN_SRC}" "${PARLEY_PLUGIN_DST}"
+    ok "linked ${PARLEY_PLUGIN_DST} → ${PARLEY_PLUGIN_SRC}"
   else
-    warn "${SIDEKICK_PLUGIN_DST} exists and is not a symlink — leaving as-is"
+    warn "${PARLEY_PLUGIN_DST} exists and is not a symlink — leaving as-is"
   fi
 else
-  warn "Sidekick Hermes plugin not found at ${SIDEKICK_PLUGIN_SRC}; pull the latest sidekick repo and rerun bootstrap"
+  warn "Parley Hermes plugin not found at ${PARLEY_PLUGIN_SRC}; pull the latest parley repo and rerun bootstrap"
 fi
 
+# OPT IN. hermes loads a user plugin only when it is listed under
+# plugins.enabled — otherwise it is skipped silently (DEBUG log), the
+# gateway says "No messaging platforms enabled" and :8645 never opens
+# (field report 2026-11-10, B1). The registration key is `parley`
+# (it was `sidekick` before the 2026-08 rename).
 CONFIG_FILE="${HERMES_HOME}/config.yaml"
 if [[ -f "${CONFIG_FILE}" ]]; then
-  if grep -qE '^[[:space:]]*-[[:space:]]*sidekick[[:space:]]*$' "${CONFIG_FILE}"; then
-    ok "sidekick plugin already enabled in ${CONFIG_FILE}"
+  if grep -qE '^[[:space:]]*-[[:space:]]*parley[[:space:]]*$' "${CONFIG_FILE}"; then
+    ok "parley plugin already enabled in ${CONFIG_FILE}"
+  elif command -v hermes >/dev/null 2>&1 && hermes plugins enable parley >/dev/null 2>&1 \
+       && grep -qE '^[[:space:]]*-[[:space:]]*parley[[:space:]]*$' "${CONFIG_FILE}"; then
+    ok "enabled parley plugin (hermes plugins enable parley)"
   elif ! grep -qE '^plugins:' "${CONFIG_FILE}"; then
     cat >> "${CONFIG_FILE}" <<'EOF'
 
 plugins:
   enabled:
-    - sidekick
+    - parley
 EOF
-    ok "enabled sidekick plugin in ${CONFIG_FILE}"
+    ok "enabled parley plugin in ${CONFIG_FILE}"
   else
-    warn "${CONFIG_FILE} already has a plugins block; add 'sidekick' under plugins.enabled if it is not present"
+    fail "${CONFIG_FILE} has a plugins block without 'parley' under plugins.enabled.
+       Add it (or run: hermes plugins enable parley) and re-run bootstrap —
+       without it the gateway never loads the plugin and Parley cannot reach the agent."
+  fi
+fi
+# PM-managed hermes resolves a plugin's pip_dependencies by its
+# plugins/<key> directory name, so the link above MUST be named `parley`
+# (a link named anything else left py_vapid/pywebpush uninstalled: B3).
+# `hermes pm install` materialises them; harmless where PM is absent.
+if command -v hermes >/dev/null 2>&1 && hermes pm --help >/dev/null 2>&1; then
+  if hermes pm install >/dev/null 2>&1; then
+    ok "hermes pm install — plugin dependencies in place"
+  else
+    warn "hermes pm install failed — run it by hand if the gateway logs 'No module named py_vapid'"
   fi
 fi
 
@@ -858,7 +909,7 @@ render_unit() {
   local tmpl="${REPO}/$1" dst="${SYSTEMD_DST}/$2"
   if [[ ! -f "${tmpl}" ]]; then
     # TODO(jscholz): repo skeleton needs systemd/*.service templates with
-    # {{USER}}, {{HOME}}, {{HERMES_HOME}}, {{SIDEKICK_PATH}}, {{HOST_NAME}}
+    # {{USER}}, {{HOME}}, {{HERMES_HOME}}, {{PARLEY_PATH}}, {{HOST_NAME}}
     # placeholders. Until those land, skip with a warning so re-running
     # doesn't fail the whole bootstrap.
     warn "systemd template missing: $1 (skipping)"
@@ -868,7 +919,7 @@ render_unit() {
     -e "s|{{USER}}|${USER}|g" \
     -e "s|{{HOME}}|${HOME}|g" \
     -e "s|{{HERMES_HOME}}|${HERMES_HOME}|g" \
-    -e "s|{{SIDEKICK_PATH}}|${SIDEKICK_PATH}|g" \
+    -e "s|{{PARLEY_PATH}}|${PARLEY_PATH}|g" \
     -e "s|{{HOST_NAME}}|${HOST_NAME}|g" \
     -e "s|{{NODE_BIN_DIR}}|${NODE_BIN_DIR}|g" \
     "${tmpl}" > "${dst}.tmp"
@@ -884,41 +935,24 @@ render_unit() {
 render_unit "systemd/hermes-gateway.service"   "hermes-gateway.service"
 render_unit "systemd/hermes-dashboard.service" "hermes-dashboard.service"
 render_unit "systemd/hindsight-server.service" "hindsight-server.service"
-render_unit "systemd/sidekick.service"         "sidekick.service"
+render_unit "systemd/parley.service"         "parley.service"
 
-# Sidekick audio bridge unit lives in the sidekick checkout, not in
-# this workflow repo (so sidekick can ship breaking changes to the unit
-# without requiring a workflow-repo bump). Symlink the file from the
-# sidekick clone into ~/.config/systemd/user/ so systemctl picks it up
-# alongside the workflow units. We do NOT render placeholders into it —
-# the upstream unit uses systemd's %h specifier which already expands to
-# $HOME at unit-load time, so it works as-is across hosts.
-SIDEKICK_AUDIO_SRC="${SIDEKICK_PATH}/audio-bridge/sidekick-audio.service"
-SIDEKICK_AUDIO_DST="${SYSTEMD_DST}/sidekick-audio.service"
-if [[ "${SIDEKICK_AUDIO_ENABLED:-0}" != "1" ]]; then
-  if [[ -L "${SIDEKICK_AUDIO_DST}" ]]; then
-    rm "${SIDEKICK_AUDIO_DST}"
-    ok "removed disabled ${SIDEKICK_AUDIO_DST}"
+# Parley audio bridge unit: rendered from THIS repo's template, not linked
+# from the parley checkout. The unit parley ships hardcodes %h/code/parley
+# and loads only the repo .env, while DEEPGRAM_API_KEY lives in
+# ~/.hermes/.env — so a clone anywhere else, or a key in the usual place,
+# left dictation with "upstream unreachable" (field report 2026-11-10, B4).
+PARLEY_AUDIO_DST="${SYSTEMD_DST}/parley-audio.service"
+if [[ "${PARLEY_AUDIO_ENABLED:-0}" != "1" ]]; then
+  if [[ -e "${PARLEY_AUDIO_DST}" || -L "${PARLEY_AUDIO_DST}" ]]; then
+    rm -f "${PARLEY_AUDIO_DST}"
+    ok "removed disabled ${PARLEY_AUDIO_DST}"
   fi
-  warn "sidekick audio bridge disabled for this install — skipping unit link"
-elif [[ -f "${SIDEKICK_AUDIO_SRC}" ]]; then
-  if [[ -L "${SIDEKICK_AUDIO_DST}" ]]; then
-    current="$(readlink "${SIDEKICK_AUDIO_DST}")"
-    if [[ "${current}" != "${SIDEKICK_AUDIO_SRC}" ]]; then
-      rm "${SIDEKICK_AUDIO_DST}"
-      ln -s "${SIDEKICK_AUDIO_SRC}" "${SIDEKICK_AUDIO_DST}"
-      ok "relinked ${SIDEKICK_AUDIO_DST} → ${SIDEKICK_AUDIO_SRC}"
-    else
-      ok "${SIDEKICK_AUDIO_DST} already linked"
-    fi
-  elif [[ -e "${SIDEKICK_AUDIO_DST}" ]]; then
-    warn "${SIDEKICK_AUDIO_DST} is a regular file (not a symlink) — leaving as-is"
-  else
-    ln -s "${SIDEKICK_AUDIO_SRC}" "${SIDEKICK_AUDIO_DST}"
-    ok "linked ${SIDEKICK_AUDIO_DST} → ${SIDEKICK_AUDIO_SRC}"
-  fi
+  warn "parley audio bridge disabled for this install — skipping unit"
 else
-  warn "sidekick audio-bridge unit not found at ${SIDEKICK_AUDIO_SRC} — skipping"
+  # A pre-rename install linked the parley repo's unit here; replace it.
+  [[ -L "${PARLEY_AUDIO_DST}" ]] && rm -f "${PARLEY_AUDIO_DST}"
+  render_unit "systemd/parley-audio.service" "parley-audio.service"
 fi
 
 systemctl --user daemon-reload
@@ -939,6 +973,7 @@ write_env() {
   # Skips if value is the __KEEP__ sentinel (already in file).
   local key="$1" val="$2"
   [[ "${val}" == "__KEEP__" ]] && return
+  val="$(sanitize_secret "${val}")"
   [[ -z "${val}" ]] && return
   if grep -qE "^${key}=" "${ENV_FILE}"; then
     # Update in place (sed -i with delimiter '|' to tolerate '/' in values).
@@ -995,19 +1030,32 @@ if [[ -z "${API_SERVER_KEY_VALUE}" ]]; then
 fi
 write_env API_SERVER_KEY "${API_SERVER_KEY_VALUE}"
 
-SIDEKICK_PLATFORM_TOKEN_VALUE="${SIDEKICK_PLATFORM_TOKEN:-$(env_value SIDEKICK_PLATFORM_TOKEN)}"
-if [[ -z "${SIDEKICK_PLATFORM_TOKEN_VALUE}" ]]; then
-  SIDEKICK_PLATFORM_TOKEN_VALUE="$(openssl rand -hex 32)"
+PARLEY_PLATFORM_TOKEN_VALUE="${PARLEY_PLATFORM_TOKEN:-$(env_value PARLEY_PLATFORM_TOKEN)}"
+if [[ -z "${PARLEY_PLATFORM_TOKEN_VALUE}" ]]; then
+  PARLEY_PLATFORM_TOKEN_VALUE="$(openssl rand -hex 32)"
 fi
-write_env SIDEKICK_PLATFORM_TOKEN "${SIDEKICK_PLATFORM_TOKEN_VALUE}"
-ensure_env_default SIDEKICK_PLATFORM_ALLOW_ALL_USERS "${SIDEKICK_PLATFORM_ALLOW_ALL_USERS:-true}"
-[[ -n "${TAILSCALE_DNS}" ]] && ensure_env_default HERMES_DASHBOARD_HOST "${TAILSCALE_DNS}"
+write_env PARLEY_PLATFORM_TOKEN "${PARLEY_PLATFORM_TOKEN_VALUE}"
+ensure_env_default PARLEY_PLATFORM_ALLOW_ALL_USERS "${PARLEY_PLATFORM_ALLOW_ALL_USERS:-true}"
+# Dashboard binds LOOPBACK by default. Current hermes refuses a
+# non-loopback bind without an auth provider (`--insecure` no longer
+# bypasses it), and the old tailnet-host default crash-looped the unit
+# every 10 s on a fresh install (field report 2026-11-10, C1). Reach it
+# over the tailnet the same way Parley is reached — Tailscale Serve —
+# or set HERMES_DASHBOARD_HOST + the HERMES_DASHBOARD_BASIC_AUTH_* vars
+# in ~/.hermes/.env yourself.
+ensure_env_default HERMES_DASHBOARD_HOST "127.0.0.1"
+if [[ -n "${TAILSCALE_DNS}" ]] && tailscale serve --bg --https=9119 http://127.0.0.1:9119 >/dev/null 2>&1; then
+  ok "configured Tailscale Serve: https://${TAILSCALE_DNS}:9119/ → dashboard on 127.0.0.1:9119"
+fi
+# WhatsApp is opt-in. The gateway otherwise parks a failed WhatsApp
+# adapter on every start and logs an ERROR (field report 2026-11-10, D2).
+ensure_env_default WHATSAPP_ENABLED "${WHATSAPP_ENABLED:-false}"
 
-write_sidekick_env SIDEKICK_PLATFORM_URL "http://127.0.0.1:8645"
-write_sidekick_env SIDEKICK_PLATFORM_TOKEN "${SIDEKICK_PLATFORM_TOKEN_VALUE}"
-write_sidekick_env SIDEKICK_PLATFORM_ALLOW_ALL_USERS "${SIDEKICK_PLATFORM_ALLOW_ALL_USERS:-true}"
-write_sidekick_env SIDEKICK_PUSH_OWNED_BY_PLUGIN "true"
-write_sidekick_env SIDEKICK_INFLIGHT_OWNED_BY_PLUGIN "true"
+write_parley_env PARLEY_PLATFORM_URL "http://127.0.0.1:8645"
+write_parley_env PARLEY_PLATFORM_TOKEN "${PARLEY_PLATFORM_TOKEN_VALUE}"
+write_parley_env PARLEY_PLATFORM_ALLOW_ALL_USERS "${PARLEY_PLATFORM_ALLOW_ALL_USERS:-true}"
+write_parley_env PARLEY_PUSH_OWNED_BY_PLUGIN "true"
+write_parley_env PARLEY_INFLIGHT_OWNED_BY_PLUGIN "true"
 ok "secrets written to ${ENV_FILE} (mode 600)"
 
 # ── 7b. Apply local patches ──────────────────────────────────────────
@@ -1058,7 +1106,10 @@ add_cron() {
     ok "cron already has: ${pattern}"
     return
   fi
-  (crontab -l 2>/dev/null; echo "${line}") | crontab -
+  # `crontab -l` exits 1 when the user has no crontab yet; under
+  # `set -o pipefail` that killed the subshell before the echo and the
+  # pipeline — and left an EMPTY crontab behind (field report 2026-11-10, A5).
+  { crontab -l 2>/dev/null || true; echo "${line}"; } | crontab -
   ok "added cron: ${pattern}"
 }
 
@@ -1075,7 +1126,7 @@ fi
 # (default 8642 — see hermes-agent/gateway/platforms/api_server.py
 # DEFAULT_PORT). Verified live: curl http://localhost:8642/health
 # returns {"status": "ok", "platform": "hermes-agent"}. The /api/rtc/health
-# path mentioned in the brief is sidekick-side; we test the gateway
+# path mentioned in the brief is parley-side; we test the gateway
 # instead because that's what proves the workflow stack is up.
 section "Smoke test"
 
@@ -1092,11 +1143,11 @@ start_unit() {
 start_unit hermes-gateway
 start_unit hermes-dashboard
 start_unit hindsight-server
-start_unit sidekick
-if [[ "${SIDEKICK_AUDIO_ENABLED:-0}" == "1" ]]; then
-  start_unit sidekick-audio
+start_unit parley
+if [[ "${PARLEY_AUDIO_ENABLED:-0}" == "1" ]]; then
+  start_unit parley-audio
 else
-  warn "sidekick-audio not started because audio bridge install is disabled"
+  warn "parley-audio not started because audio bridge install is disabled"
 fi
 
 # Give the services a few seconds to bind before we probe.
@@ -1122,25 +1173,25 @@ probe_url() {
 
 GATEWAY_HEALTH_URL="http://127.0.0.1:8642/health"
 HINDSIGHT_HEALTH_URL="http://127.0.0.1:8765/health"
-SIDEKICK_PLUGIN_HEALTH_URL="http://127.0.0.1:8645/v1/health"
-SIDEKICK_URL="${SIDEKICK_LOCAL_SCHEME}://127.0.0.1:3001/"
+PARLEY_PLUGIN_HEALTH_URL="http://127.0.0.1:8645/v1/health"
+PARLEY_URL="${PARLEY_LOCAL_SCHEME}://127.0.0.1:3001/"
 probe_url "gateway" "${GATEWAY_HEALTH_URL}" || warn "check: journalctl --user -u hermes-gateway -n 100"
 probe_url "hindsight" "${HINDSIGHT_HEALTH_URL}" || warn "check: journalctl --user -u hindsight-server -n 100"
-probe_url "sidekick plugin" "${SIDEKICK_PLUGIN_HEALTH_URL}" "${SIDEKICK_PLATFORM_TOKEN_VALUE}" || warn "check: journalctl --user -u hermes-gateway -n 100"
-probe_url "sidekick" "${SIDEKICK_URL}" || warn "check: journalctl --user -u sidekick -n 100"
+probe_url "parley plugin" "${PARLEY_PLUGIN_HEALTH_URL}" "${PARLEY_PLATFORM_TOKEN_VALUE}" || warn "check: journalctl --user -u hermes-gateway -n 100"
+probe_url "parley" "${PARLEY_URL}" || warn "check: journalctl --user -u parley -n 100"
 
 # ── 9. Next steps ────────────────────────────────────────────────────
 section "Next steps"
 
 if [[ -n "${TAILSCALE_DNS:-}" ]]; then
-  SIDEKICK_OPEN_URL="https://${TAILSCALE_DNS}:3001/"
+  PARLEY_OPEN_URL="https://${TAILSCALE_DNS}:3001/"
 else
-  SIDEKICK_OPEN_URL="http://127.0.0.1:3001/"
+  PARLEY_OPEN_URL="http://127.0.0.1:3001/"
 fi
 
 cat <<EOF
-  ${C_BOLD}Open the sidekick PWA${C_RESET}
-    ${SIDEKICK_OPEN_URL}
+  ${C_BOLD}Open the parley PWA${C_RESET}
+    ${PARLEY_OPEN_URL}
 
   ${C_BOLD}Update later${C_RESET}
     cd ${REPO} && git pull && ./scripts/bootstrap.sh
@@ -1153,7 +1204,9 @@ cat <<EOF
   ${C_BOLD}Edit your config${C_RESET}
     \$EDITOR ${HERMES_HOME}/config.yaml
     (it's symlinked to ${REPO}/example.config.yaml — copy first if you
-    want per-instance changes that aren't tracked by the framework repo)
+    want per-instance changes that aren't tracked by the framework repo;
+    edit the file rather than \`hermes config set\`, which rewrites the
+    symlink into a plain file)
 
 EOF
 

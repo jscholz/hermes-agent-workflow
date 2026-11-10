@@ -12,7 +12,7 @@
 # Workflow:
 #   1. Verify ACTIVE_HOST names this host.
 #   2. Stop hermes services (gateway, dashboard, hindsight-server) and
-#      any sidekick units that exist (sidekick, sidekick-audio,
+#      any parley units that exist (parley, parley-audio,
 #      whatsapp-bridge).
 #   3. Run sync-hindsight-bank.sh to capture the final dump (BEFORE
 #      hindsight-server stops so pg0 is still alive — wait, hindsight
@@ -20,7 +20,7 @@
 #      Approach: stop OTHER services first, dump while hindsight is
 #      still up, then stop hindsight).
 #   4. Run sync-hermes-state.sh for the final SQLite sessions/messages dump.
-#   5. Run sync-sidekick-db.sh for Sidekick UI/session metadata.
+#   5. Run sync-parley-db.sh for Parley UI/session metadata.
 #   6. Run sync-hermes.sh to commit any repo-backed drift.
 #   7. Update ACTIVE_HOST to "no host active" with a transition note.
 #   8. git add ACTIVE_HOST; git commit; git push.
@@ -65,14 +65,14 @@ fi
 
 # --- 3. Stop + disable services in dependency-friendly order -----------
 # `disable` removes the wants/ link so the unit won't auto-start on
-# next reboot. For unit files installed via SYMLINK (sidekick-audio
-# from the sidekick repo), disable ALSO removes the unit symlink
+# next reboot. For unit files installed via SYMLINK (parley-audio
+# from the parley repo), disable ALSO removes the unit symlink
 # itself, leaving the unit `not-found` until handoff-in re-links it.
 # That's fine — handoff-in always re-installs symlinked units.
 say "stopping + disabling services on ${HOSTNAME}..."
 
 # Top-level services first (they hold connections to hindsight).
-for unit in whatsapp-bridge.service sidekick-audio.service sidekick.service \
+for unit in whatsapp-bridge.service parley-audio.service parley.service \
             hermes-gateway.service hermes-dashboard.service; do
   if systemctl --user list-unit-files --no-legend "${unit}" 2>/dev/null | grep -q "${unit}"; then
     if systemctl --user is-active --quiet "${unit}"; then
@@ -84,13 +84,13 @@ for unit in whatsapp-bridge.service sidekick-audio.service sidekick.service \
 done
 
 # Capture final SQLite state after user-facing writers are stopped. The
-# online-backup path is safe while live, but doing it after gateway/Sidekick
+# online-backup path is safe while live, but doing it after gateway/Parley
 # stop gives the handoff a crisp "no more messages after this point" boundary.
 say "capturing final Hermes SQLite state..."
 "${REPO}/scripts/sync-hermes-state.sh" || warn "sync-hermes-state.sh non-zero — proceeding anyway"
 
-say "capturing final Sidekick supplemental DB..."
-"${REPO}/scripts/sync-sidekick-db.sh" || warn "sync-sidekick-db.sh non-zero — proceeding anyway"
+say "capturing final Parley supplemental DB..."
+"${REPO}/scripts/sync-parley-db.sh" || warn "sync-parley-db.sh non-zero — proceeding anyway"
 
 # Run a final hindsight dump while pg0 is still up (hindsight-server hasn't
 # been stopped yet). The sync script will exit cleanly if hindsight-server

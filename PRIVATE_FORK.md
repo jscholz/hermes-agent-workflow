@@ -68,7 +68,7 @@ Google account.
 - `sync-cc-history.sh` every 15 minutes for Claude Code memory
 - `sync-hermes-state.sh` daily for `~/.hermes/state.db`
 - `sync-hindsight-bank.sh` daily for Hindsight Postgres
-- `sync-sidekick-db.sh` daily for Sidekick UI state
+- `sync-parley-db.sh` daily for Parley UI state
 - `prune-claude-cc-history.sh` daily
 
 The script refuses to install these crons while `origin` is the public
@@ -85,7 +85,7 @@ In a promoted repo, git-crypt encrypts:
 - `hosts/**` except the public example host
 - `sessions/**`
 - `cron/jobs.json` and `cron/output/**`
-- `hermes-data/**`, `hindsight-data/**`, `sidekick-data/**`
+- `hermes-data/**`, `hindsight-data/**`, `parley-data/**`
 
 The placeholder `.gitkeep` and README files that make the public template
 legible remain plaintext.
@@ -97,10 +97,10 @@ git clone git@github.com:YOUR_GITHUB_USER/my-agent-private.git ~/code/my-agent-p
 cd ~/code/my-agent-private
 git-crypt unlock /path/to/git-crypt.key
 ./scripts/bootstrap.sh --unattended
-systemctl --user stop hermes-gateway sidekick
+systemctl --user stop hermes-gateway parley
 ./scripts/restore-hermes-state.sh --yes
-./scripts/restore-sidekick-db.sh --yes
+./scripts/restore-parley-db.sh --yes
 ./scripts/restore-hindsight-bank.sh --yes
-systemctl --user start hindsight-server hermes-gateway hermes-dashboard sidekick
+systemctl --user start hindsight-server hermes-gateway hermes-dashboard parley
 ./scripts/doctor.sh
 ```

@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
-# Restore ~/.hermes/sidekick.db from sidekick-data/sidekick.sql.
+# Restore ~/.hermes/parley.db from parley-data/parley.sql.
 #
-# DESTRUCTIVE: replaces ${HOME}/.hermes/sidekick.db. Requires Hermes gateway
-# and Sidekick proxy/audio services to be stopped because they read/write this
+# DESTRUCTIVE: replaces ${HOME}/.hermes/parley.db. Requires Hermes gateway
+# and Parley proxy/audio services to be stopped because they read/write this
 # DB and its WAL.
 set -euo pipefail
 
 REPO="${REPO:-$(cd "$(dirname "$0")/.." && pwd)}"
-DUMP="${REPO}/sidekick-data/sidekick.sql"
-LIVE_DB="${HOME}/.hermes/sidekick.db"
+DUMP="${REPO}/parley-data/parley.sql"
+LIVE_DB="${HOME}/.hermes/parley.db"
 ASSUME_YES=0
 
 export PATH="${HOME}/.local/sqlite-3.50.2/bin:${HOME}/miniconda3/bin:${PATH}"
 SQLITE3="$(command -v sqlite3 || true)"
 if [[ -z "${SQLITE3}" ]]; then
-  echo "[restore-sidekick-db] sqlite3 not found — install sqlite3 or provide ~/.local/sqlite-3.50.2/bin/sqlite3" >&2
+  echo "[restore-parley-db] sqlite3 not found — install sqlite3 or provide ~/.local/sqlite-3.50.2/bin/sqlite3" >&2
   exit 1
 fi
 
@@ -34,14 +34,14 @@ say()  { printf '→ %s\n' "$*"; }
 
 if [[ ! -f "${DUMP}" ]]; then
   die "no dump at ${DUMP}.
-     Run scripts/sync-sidekick-db.sh on the previous active host first
+     Run scripts/sync-parley-db.sh on the previous active host first
      (or unlock git-crypt: git-crypt unlock <key>)."
 fi
 
-for unit in hermes-gateway.service sidekick.service sidekick-audio.service; do
+for unit in hermes-gateway.service parley.service parley-audio.service; do
   if systemctl --user is-active --quiet "${unit}"; then
     die "${unit} is active. Stop it before restoring:
-       systemctl --user stop hermes-gateway.service sidekick.service sidekick-audio.service"
+       systemctl --user stop hermes-gateway.service parley.service parley-audio.service"
   fi
 done
 
@@ -50,9 +50,9 @@ if (( ! ASSUME_YES )); then
 ${c_y}This will REPLACE${c_0} ${LIVE_DB} with the contents of:
   ${DUMP}  ($(du -h "${DUMP}" | cut -f1))
 
-Existing Sidekick UI state on this host will be wiped. This includes
+Existing Parley UI state on this host will be wiped. This includes
 conversation titles, pins, push subscriptions, unread/activity state,
-VAPID keys, and Sidekick's UI-facing message rows.
+VAPID keys, and Parley's UI-facing message rows.
 
 Continue? [y/N]
 EOF
@@ -64,12 +64,12 @@ fi
 
 mkdir -p "$(dirname "${LIVE_DB}")" "${HOME}/.hermes/backups"
 if [[ -f "${LIVE_DB}" ]]; then
-  BACKUP="${HOME}/.hermes/backups/sidekick.db.pre-restore.$(date +%Y%m%d-%H%M%S)"
+  BACKUP="${HOME}/.hermes/backups/parley.db.pre-restore.$(date +%Y%m%d-%H%M%S)"
   cp -a "${LIVE_DB}" "${BACKUP}"
-  ok "backed up existing sidekick.db to ${BACKUP}"
+  ok "backed up existing parley.db to ${BACKUP}"
 fi
 
-say "wiping existing sidekick.db..."
+say "wiping existing parley.db..."
 rm -f "${LIVE_DB}" "${LIVE_DB}-shm" "${LIVE_DB}-wal"
 
 say "replaying ${DUMP}..."

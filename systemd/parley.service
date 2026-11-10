@@ -1,0 +1,24 @@
+[Unit]
+Description=Parley proxy (Node.js PWA + /v1/* agent surface, local port 3001)
+After=hermes-gateway.service network-online.target
+Wants=hermes-gateway.service network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory={{PARLEY_PATH}}
+EnvironmentFile={{PARLEY_PATH}}/.env
+Environment=PARLEY_PUSH_OWNED_BY_PLUGIN=true
+Environment=PARLEY_INFLIGHT_OWNED_BY_PLUGIN=true
+# npm's shebang is `/usr/bin/env node`; with nvm, node is not on the
+# unit's default PATH, so `npm run build` died with "env: 'node': No such
+# file" (field report 2026-11-10, D1). Put the node dir first.
+Environment=PATH={{NODE_BIN_DIR}}:/usr/local/bin:/usr/bin:/bin
+ExecStartPre={{NODE_BIN_DIR}}/npm run build
+ExecStart={{NODE_BIN_DIR}}/node --experimental-strip-types --disable-warning=ExperimentalWarning server.ts
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

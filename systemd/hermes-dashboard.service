@@ -14,7 +14,11 @@ Type=simple
 # doesn't need per-host editing. Set it to your tailnet FQDN there:
 #   HERMES_DASHBOARD_HOST=<your-host>.tailXXXX.ts.net
 EnvironmentFile=%h/.hermes/.env
-ExecStart=/bin/sh -c '%h/.local/bin/hermes dashboard --host ${HERMES_DASHBOARD_HOST} --port 9119 --no-open --insecure'
+# Loopback by default. Current hermes ALWAYS requires an auth provider on
+# a non-loopback bind (--insecure no longer bypasses it), so a tailnet host
+# here without HERMES_DASHBOARD_BASIC_AUTH_* crash-loops the unit. Reach
+# the dashboard over the tailnet via Tailscale Serve (bootstrap sets it up).
+ExecStart=/bin/sh -c '%h/.local/bin/hermes dashboard --host ${HERMES_DASHBOARD_HOST:-127.0.0.1} --port 9119 --no-open --insecure'
 Restart=on-failure
 RestartSec=5
 Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin

@@ -1,7 +1,7 @@
 # Host Handoff
 
 This workflow assumes one active writer at a time. The active host runs
-Hermes services, Sidekick, and sync crons; standby hosts can be installed
+Hermes services, Parley, and sync crons; standby hosts can be installed
 but should not mutate encrypted state dumps.
 
 `ACTIVE_HOST` is the coordination sentinel. The sync scripts check it and
@@ -19,7 +19,7 @@ scripts/handoff-out.sh
 That stops user-facing services, captures final dumps for:
 
 - `~/.hermes/state.db` to `hermes-data/state.sql`
-- `~/.hermes/sidekick.db` to `sidekick-data/sidekick.sql`
+- `~/.hermes/parley.db` to `parley-data/parley.sql`
 - Hindsight Postgres to `hindsight-data/**`
 
 It then clears `ACTIVE_HOST`, commits, and pushes.
@@ -32,7 +32,7 @@ git pull --ff-only
 scripts/handoff-in.sh
 ```
 
-That restores Hermes state, Sidekick UI state, and Hindsight memory;
+That restores Hermes state, Parley UI state, and Hindsight memory;
 relinks runtime directories; installs expected crons; starts services; and
 runs `scripts/handoff-smoke-test.sh`.
 
@@ -49,7 +49,7 @@ after its last successful sync are lost.
 
 ## HTTPS
 
-Sidekick should be served over HTTPS for any browser that is not on
+Parley should be served over HTTPS for any browser that is not on
 `localhost`; microphone, PWA, push, and WebRTC features require a browser
 secure context. `scripts/bootstrap.sh` prefers Tailscale Serve and maps:
 
@@ -67,17 +67,17 @@ sudo tailscale set --operator=$USER
 Do not treat native self-signed HTTPS as equivalent to the Tailscale
 setup: it encrypts traffic but browsers will label it "Not Secure."
 Self-signed fallback is only for explicit non-Tailscale installs via
-`SIDEKICK_ALLOW_SELF_SIGNED_FALLBACK=1`.
+`PARLEY_ALLOW_SELF_SIGNED_FALLBACK=1`.
 
 ## Access Control
 
 Tailscale Serve is **tailnet-only**, not **user-only**. If your tailnet
 policy lets a machine reach `<agent-host>:3001`, that machine can load the
-Sidekick app and call its API. Do not assume that a user-owned node is
+Parley app and call its API. Do not assume that a user-owned node is
 private merely because it is not tagged as a robot or workstation.
 
 For a personal-only agent, add a tailnet ACL/grant that allows only owner-owned
-devices to reach the active host's Sidekick port and removes broader
+devices to reach the active host's Parley port and removes broader
 `*:*` / tag-wide access for that destination. Example shape:
 
 ```json

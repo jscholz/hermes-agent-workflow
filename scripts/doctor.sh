@@ -80,12 +80,19 @@ for dir_link in \
   "${HERMES}/memories" \
   "${HERMES}/skills" \
   "${HERMES}/cron" \
-  "${HERMES}/hooks" \
-  "${HERMES}/plugins"; do
+  "${HERMES}/hooks"; do
   if [[ -e "${dir_link}" && ! -L "${dir_link}" ]]; then
     ISSUES+=("directory-symlink broken: ${dir_link} is a regular dir (manual review)")
   fi
 done
+# plugins/ is deliberately a REAL directory (PM-managed hermes refuses
+# `hermes plugins install` into a dir that resolves outside HERMES_HOME);
+# only the parley plugin inside it is a link into the parley clone.
+if [[ -L "${HERMES}/plugins" ]]; then
+  ISSUES+=("plugins dir: ${HERMES}/plugins is a symlink — catalog plugins (hindsight) cannot install; re-run bootstrap")
+elif [[ ! -e "${HERMES}/plugins/parley" ]]; then
+  ISSUES+=("parley plugin: ${HERMES}/plugins/parley missing — re-run bootstrap")
+fi
 
 # ── 2. Services ───────────────────────────────────────────────────────
 check_service() {
@@ -100,7 +107,7 @@ check_service() {
 check_service hermes-gateway
 check_service hermes-dashboard
 check_service hindsight-server
-check_service sidekick
+check_service parley
 
 if ! curl -fsS --max-time 3 http://127.0.0.1:8642/health >/dev/null 2>&1; then
   ISSUES+=("gateway: /health not responding on 127.0.0.1:8642")
@@ -108,15 +115,15 @@ fi
 if ! curl -fsS --max-time 3 http://127.0.0.1:8765/health >/dev/null 2>&1; then
   ISSUES+=("hindsight: /health not responding on 127.0.0.1:8765")
 fi
-sidekick_token=$( (grep -E '^SIDEKICK_PLATFORM_TOKEN=' "${HERMES}/.env" 2>/dev/null || true) | cut -d= -f2- | tr -d '"' | head -1)
-if [[ -z "${sidekick_token}" ]]; then
-  ISSUES+=("sidekick plugin: SIDEKICK_PLATFORM_TOKEN missing from ${HERMES}/.env")
-elif ! curl -fsS --max-time 3 -H "Authorization: Bearer ${sidekick_token}" \
+parley_token=$( (grep -E '^PARLEY_PLATFORM_TOKEN=' "${HERMES}/.env" 2>/dev/null || true) | cut -d= -f2- | tr -d '"' | head -1)
+if [[ -z "${parley_token}" ]]; then
+  ISSUES+=("parley plugin: PARLEY_PLATFORM_TOKEN missing from ${HERMES}/.env")
+elif ! curl -fsS --max-time 3 -H "Authorization: Bearer ${parley_token}" \
     http://127.0.0.1:8645/v1/health >/dev/null 2>&1; then
-  ISSUES+=("sidekick plugin: /v1/health not responding on 127.0.0.1:8645")
+  ISSUES+=("parley plugin: /v1/health not responding on 127.0.0.1:8645")
 fi
 if ! curl -fsS --max-time 3 http://127.0.0.1:3001/ >/dev/null 2>&1; then
-  ISSUES+=("sidekick: proxy not responding on 127.0.0.1:3001")
+  ISSUES+=("parley: proxy not responding on 127.0.0.1:3001")
 fi
 
 # ── 3. WhatsApp bridge reachable (best-effort; only if configured) ───

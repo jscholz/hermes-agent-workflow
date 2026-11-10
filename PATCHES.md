@@ -15,7 +15,7 @@ local changes on top without setting anything up.
 ## Why no patches?
 
 This template's job is to give a new user a working hermes-agent +
-sidekick install with the resume protocol, prune cron, and other
+parley install with the resume protocol, prune cron, and other
 workflow conveniences. The personal customizations the original
 author iterates on (group-mute toggles, react tools, identity prefix
 for shared groups) are deliberately kept out: they're personal
@@ -69,14 +69,14 @@ so stale assumptions never silently land.
 
 | File | What it does | Why not yet upstream | Upstream candidate? |
 |------|--------------|----------------------|---------------------|
-| `0001-fix-state-FTS-self-heal-verifies-sync-triggers-not-j.patch` | Startup FTS self-heal verifies the sync *triggers*, not just the table. A restored `state.db` can carry FTS tables without their insert/delete/update triggers (older restore tooling rebuilt tables only), silently freezing the search index. If any piece is missing, the table is rebuilt and backfilled from `messages`. | PR to NousResearch/hermes-agent not yet opened. | Yes — data-integrity fix, no deployment-specific behavior. |
+| _(none)_ | The template ships virgin upstream hermes-agent. The last patch (FTS self-heal trigger verification) was retired 2026-11-10: upstream moved FTS setup into `hermes_state_fts.py` and the patch no longer applied (fresh-install report, A4). | — | — |
 
 ## Notes
 
 - Patches that touched the WebRTC subsystem are intentionally NOT
   included anywhere in this template — the WebRTC stack moved out of
-  hermes-agent into the sidekick repo (`audio-bridge/`).
-- Sidekick ↔ Hermes integration is through the first-class Sidekick
-  Hermes plugin at `sidekick/backends/hermes/plugin`. `bootstrap.sh`
-  symlinks that plugin into `~/.hermes/plugins/sidekick` and enables it
+  hermes-agent into the parley repo (`audio-bridge/`).
+- Parley ↔ Hermes integration is through the first-class Parley
+  Hermes plugin at `parley/backends/hermes/plugin`. `bootstrap.sh`
+  symlinks that plugin into `~/.hermes/plugins/parley` and enables it
   in config. No core hermes patch is expected for a fresh install.

@@ -56,7 +56,10 @@ if [[ ! -d "${HERMES_AGENT_PATH}/.git" ]]; then
          git clone https://github.com/NousResearch/hermes-agent.git ${HERMES_AGENT_PATH}"
 fi
 
-DIRTY="$(git -C "${HERMES_AGENT_PATH}" status --porcelain)"
+# `venv` is bootstrap's symlink to ~/.hermes/hermes-venv; upstream's
+# .gitignore pattern `/venv/` only matches a directory, so the link shows
+# as untracked on a fresh machine (field report 2026-11-10, A1). Not dirt.
+DIRTY="$(git -C "${HERMES_AGENT_PATH}" status --porcelain | grep -vE '^\?\? venv/?$' || true)"
 if [[ -n "${DIRTY}" ]]; then
   fail "${HERMES_AGENT_PATH} has uncommitted changes:
 $(printf '%s\n' "${DIRTY}" | sed 's/^/         /')
@@ -105,7 +108,14 @@ info "checking out ${APPLIED_BRANCH} from origin/main"
 git -C "${HERMES_AGENT_PATH}" checkout -B "${APPLIED_BRANCH}" origin/main --quiet
 
 info "applying ${#PATCHES[@]} patches"
-if ! git -C "${HERMES_AGENT_PATH}" am "${PATCHES[@]}"; then
+# A fresh machine has no git identity and `git am` refuses to commit
+# without one (field report 2026-11-10, A3). Supply a local one for this
+# command only when the user has none configured.
+AM_IDENT=()
+if [[ -z "$(git -C "${HERMES_AGENT_PATH}" config user.email 2>/dev/null)" ]]; then
+  AM_IDENT=(-c user.name=hermes-bootstrap -c user.email=bootstrap@localhost)
+fi
+if ! git -C "${HERMES_AGENT_PATH}" "${AM_IDENT[@]}" am "${PATCHES[@]}"; then
   CONFLICT_PATH="$(git -C "${HERMES_AGENT_PATH}" status --porcelain | awk '/^UU /{print $2; exit}')"
   warn "git am failed; aborting partial application"
   git -C "${HERMES_AGENT_PATH}" am --abort || true

@@ -11,7 +11,7 @@
 #   4. Commit the regenerated patch files + update PATCHES.md, open PR.
 #
 # Currently only `hermes-agent` is supported as a target repo, but the
-# script is structured so a future second target (e.g. sidekick) can be
+# script is structured so a future second target (e.g. parley) can be
 # bolted on without changing the calling convention.
 #
 # Usage:

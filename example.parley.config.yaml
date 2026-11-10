@@ -1,33 +1,33 @@
-# Sidekick deployment config — EXAMPLE / TEMPLATE
+# Parley deployment config — EXAMPLE / TEMPLATE
 #
-# Copy to `sidekick.config.yaml` and edit. See sidekick/example.config.yaml
-# in the sidekick repo for the full schema + comments.
+# Copy to `parley.config.yaml` and edit. See parley/example.config.yaml
+# in the parley repo for the full schema + comments.
 #
 # Secrets (DEEPGRAM_API_KEY, GW_TOKEN, OPENROUTER_API_KEY, TAVILY_API_KEY,
-# etc.) live in the sidekick.service systemd unit as Environment= entries
+# etc.) live in the parley.service systemd unit as Environment= entries
 # — NOT in this file. TAVILY_API_KEY is optional; without it hermes's
 # web_search / web_extract tools are no-ops. Free tier at https://tavily.com.
 
 # ── Branding ──────────────────────────────────────────────────────────
 app:
-  name: <your-sidekick-name>          # e.g. "SideKick"
+  name: <your-parley-name>          # e.g. "Parley"
   subtitle: <short-tagline>           # e.g. "Agent Portal"
   agent_label: <agent-display-name>   # what the UI calls the assistant
   theme_primary: ~                    # hex color or ~ for default
 
 # ── Backend ───────────────────────────────────────────────────────────
 backend:
-  sidekick_platform:
+  parley_platform:
     # Hermes platform-adapter (peer of telegram/slack/signal). The
     # adapter runs in-process inside hermes-agent on port 8645.
-    # Auth token comes from $SIDEKICK_PLATFORM_TOKEN (systemd drop-in
-    # or env). Sidekick reads only this key — the legacy backend.hermes
+    # Auth token comes from $PARLEY_PLATFORM_TOKEN (systemd drop-in
+    # or env). Parley reads only this key — the legacy backend.hermes
     # block (state_db / store_db / cli_path) is gone post-refactor.
     url: http://127.0.0.1:8645
-    # Which hermes platforms surface in the drawer. `api_server` is sidekick
+    # Which hermes platforms surface in the drawer. `api_server` is parley
     # itself; add the chat platforms you want visible (telegram/whatsapp/
-    # slack/signal/discord). Non-sidekick chats render with a source badge
-    # and a read-only composer (sidekick can't send to those platforms yet).
+    # slack/signal/discord). Non-parley chats render with a source badge
+    # and a read-only composer (parley can't send to those platforms yet).
     session_sources: [api_server, telegram, whatsapp, slack]
 
 # ── Ambient weather (corner widget) ───────────────────────────────────
@@ -42,12 +42,12 @@ server:
   disable_screenshot: false
   # Bootstrap prefers Tailscale Serve for trusted HTTPS:
   #   https://<host>.<tailnet>.ts.net:3001/ -> http://127.0.0.1:3001
-  # Native Sidekick HTTPS is only an explicit non-Tailscale fallback:
-  # SIDEKICK_ALLOW_SELF_SIGNED_FALLBACK=1 scripts/bootstrap.sh
+  # Native Parley HTTPS is only an explicit non-Tailscale fallback:
+  # PARLEY_ALLOW_SELF_SIGNED_FALLBACK=1 scripts/bootstrap.sh
   # Browsers will label self-signed certs "Not Secure" until trusted.
   https:
-    cert_file: ~/.local/share/sidekick/tls/sidekick.crt
-    key_file: ~/.local/share/sidekick/tls/sidekick.key
+    cert_file: ~/.local/share/parley/tls/parley.crt
+    key_file: ~/.local/share/parley/tls/parley.key
 
 # ── STT keyterm biasing (managed via Settings → STT keyterms in UI) ──
 # Add proper nouns, names, brands, jargon that Deepgram should bias toward.

@@ -1,0 +1,26 @@
+[Unit]
+Description=Parley audio bridge (WebRTC + streaming STT, local port 8643)
+After=parley.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Rendered by scripts/bootstrap.sh (render_unit): {{PARLEY_PATH}} is the
+# clone this install uses — the unit shipped inside the parley repo
+# hardcodes %h/code/parley and only loads the repo .env, which is why
+# bootstrap renders its own (field report 2026-11-10, B4).
+WorkingDirectory={{PARLEY_PATH}}/audio-bridge
+ExecStart={{PARLEY_PATH}}/audio-bridge/.venv/bin/python bridge.py
+# DEEPGRAM_API_KEY lives in ~/.hermes/.env; PARLEY_* in the repo .env.
+EnvironmentFile=-{{HERMES_HOME}}/.env
+EnvironmentFile=-{{PARLEY_PATH}}/.env
+Environment=PARLEY_AUDIO_HOST=127.0.0.1
+Environment=PARLEY_AUDIO_PORT=8643
+Environment=PARLEY_PROXY_URL=http://127.0.0.1:3001
+Restart=on-failure
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

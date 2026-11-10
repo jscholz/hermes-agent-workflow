@@ -1,7 +1,7 @@
 # Contributing
 
 This repo is the synchronization medium between contributors who run
-their own hermes + sidekick deployments. We coordinate via PRs to the
+their own hermes + parley deployments. We coordinate via PRs to the
 public template; everyone develops on a private fork.
 
 ## How patches work in this repo
@@ -85,7 +85,7 @@ was renamed/moved), the next `apply-patches.sh` will fail loudly via
 
 ## Scope
 
-This repo carries patches against `hermes-agent` only. Sidekick
-changes belong in [`jscholz/sidekick`](https://github.com/jscholz/sidekick)
+This repo carries patches against `hermes-agent` only. Parley
+changes belong in [`jscholz/parley`](https://github.com/jscholz/parley)
 — that's a separate public repo with its own commit history. Don't
-add patch files for sidekick here.
+add patch files for parley here.
