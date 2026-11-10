@@ -5,14 +5,10 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-# Bind directly to the tailnet hostname. Socket lives on the tailnet
-# interface only (not LAN-reachable). --insecure is required to bind
-# non-loopback, but the dashboard's Host-header defense still kicks
-# in: only requests with Host: ${HERMES_DASHBOARD_HOST} are accepted.
-#
-# HERMES_DASHBOARD_HOST is read from ~/.hermes/.env so the unit file
-# doesn't need per-host editing. Set it to your tailnet FQDN there:
-#   HERMES_DASHBOARD_HOST=<your-host>.tailXXXX.ts.net
+# HERMES_DASHBOARD_HOST is read from ~/.hermes/.env (bootstrap writes
+# 127.0.0.1). To bind a tailnet FQDN instead you must ALSO configure an
+# auth provider (HERMES_DASHBOARD_BASIC_AUTH_USERNAME / _PASSWORD_HASH /
+# _SECRET) — current hermes refuses a non-loopback bind without one.
 EnvironmentFile=%h/.hermes/.env
 # Loopback by default. Current hermes ALWAYS requires an auth provider on
 # a non-loopback bind (--insecure no longer bypasses it), so a tailnet host
@@ -24,9 +20,11 @@ RestartSec=5
 Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 # Keep Hermes' startup skill sync from rewriting the workflow checkout.
 Environment=HERMES_BUNDLED_SKILLS=%h/.hermes/skills
-# Point hermes at the prebuilt web UI so it doesn't re-run `npm run build`
-# (tsc + vite) on every service start — that's a minutes-long CPU burn on the Pi.
-Environment=HERMES_WEB_DIST=%h/.hermes/hermes-agent/hermes_cli/web_dist
+# No HERMES_WEB_DIST override. Current hermes does not ship a prebuilt
+# web_dist in the source tree; with the override pointing at that path the
+# dashboard refused to start ("HERMES_WEB_DIST is set but no web dist
+# found") and crash-looped on a virgin install (2026-11-10). Unset, hermes
+# locates or builds its default UI itself.
 
 [Install]
 WantedBy=default.target

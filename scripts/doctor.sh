@@ -127,7 +127,10 @@ if ! curl -fsS --max-time 3 http://127.0.0.1:3001/ >/dev/null 2>&1; then
 fi
 
 # ── 3. WhatsApp bridge reachable (best-effort; only if configured) ───
+# Opt-in only: bootstrap writes WHATSAPP_ENABLED=false by default, which
+# must not count as "configured" (virgin-install run 2026-11-10).
 if grep -qE '^WHATSAPP_' "${HERMES}/.env" 2>/dev/null \
+    && ! grep -qiE '^WHATSAPP_ENABLED=(false|0|no)\b' "${HERMES}/.env" 2>/dev/null \
     && systemctl --user is-active hermes-gateway >/dev/null 2>&1; then
   if ! curl -sf --max-time 2 http://localhost:3000/health >/dev/null 2>&1; then
     ISSUES+=("whatsapp bridge: /health not responding on :3000")

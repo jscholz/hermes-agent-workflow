@@ -739,6 +739,37 @@ else
   warn "${HERMES_VENV} not present — skip hindsight-client install"
 fi
 
+# The hindsight memory PROVIDER left hermes core and is a catalog plugin
+# now; a fresh install ended with "memory.provider is 'unset'" and
+# built-in memory only (field report 2026-11-10, C3). Install it without
+# the interactive dependency prompt, then point memory.provider at it —
+# by editing the config FILE (the symlink target), never `hermes config
+# set`, which replaces the symlink with a plain copy (C5).
+if command -v hermes >/dev/null 2>&1; then
+  if [[ -d "${HERMES_HOME}/plugins/hindsight" ]]; then
+    ok "hindsight memory plugin already installed"
+  elif hermes plugins install hindsight --yes-deps --enable >/dev/null 2>&1; then
+    ok "installed + enabled the hindsight memory plugin"
+  else
+    warn "could not install the hindsight memory plugin — run: hermes plugins install hindsight --yes-deps --enable"
+  fi
+  if [[ -d "${HERMES_HOME}/plugins/hindsight" && -e "${HERMES_HOME}/config.yaml" ]]; then
+    cfg_real="$(readlink -f "${HERMES_HOME}/config.yaml")"
+    python3 - "${cfg_real}" <<'PY'
+import re, sys
+p = sys.argv[1]; txt = open(p).read()
+m = re.search(r'^memory:[ \t]*\n((?:[ \t]+.*\n?)*)', txt, re.M)
+if m and re.search(r'^[ \t]+provider:', m.group(1), re.M):
+    sys.exit(0)
+if m:
+    txt = txt[:m.end(0) - len(m.group(1))] + "  provider: hindsight\n" + m.group(1) + txt[m.end(0):]
+else:
+    txt = txt.rstrip("\n") + "\nmemory:\n  provider: hindsight\n"
+open(p, "w").write(txt); print("set memory.provider: hindsight")
+PY
+  fi
+fi
+
 # ── 5c. Parley hermes plugin ───────────────────────────────────────
 # Parley's current Hermes integration is a first-class plugin under
 # the parley checkout. No core hermes patch should be needed for a
