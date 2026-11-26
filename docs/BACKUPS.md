@@ -17,6 +17,12 @@ All three are taken from `.backup` snapshots with a WAL-safe sqlite3
 unlink the gateway's live WAL) or `COPY (… ORDER BY …)`.
 `memory_units.embedding` is excluded (derived; hindsight rebuilds it).
 
+Backed up as plain files in the same snapshot (`bk_extra_paths` in
+`scripts/lib/backup-common.sh`): `~/.parley/{captures,docs,uploads}` and
+`$HERMES_HOME/{private,vault,apns}` when present, plus anything in
+`BACKUP_EXTRA_PATHS`. Restore those with `restic restore latest --target /
+--path <dir>`; nothing to replay.
+
 ## Where it goes
 
 `scripts/backup-nightly.sh` (cron 03:33 on the `ACTIVE_HOST`; a standby

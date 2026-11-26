@@ -100,7 +100,9 @@ if ! restic -r "${LOCAL_REPO}" cat config >/dev/null 2>&1; then
   bk_log "initialising local repo ${LOCAL_REPO}"
   restic -r "${LOCAL_REPO}" init -q || { fail "local init"; exit 1; }
 fi
-summary=$(restic -r "${LOCAL_REPO}" backup "${BACKUP_STAGE}" --tag nightly --json 2>&1 | grep '"message_type":"summary"' | tail -1)
+mapfile -t extra < <(bk_extra_paths)
+st[extra_paths]="${extra[*]}"
+summary=$(restic -r "${LOCAL_REPO}" backup "${BACKUP_STAGE}" "${extra[@]}" --tag nightly --json 2>&1 | grep '"message_type":"summary"' | tail -1)
 if [[ -n "${summary}" ]]; then
   st[local_snapshot]=$(python3 -c 'import json,sys; d=json.loads(sys.argv[1]); print(d.get("snapshot_id","")[:8])' "${summary}")
   st[local_data_added]=$(python3 -c 'import json,sys; d=json.loads(sys.argv[1]); print(d.get("data_added",0))' "${summary}")

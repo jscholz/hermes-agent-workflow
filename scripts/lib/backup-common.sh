@@ -11,6 +11,19 @@
 BACKUP_HOME="${BACKUP_HOME:-$HOME/.backups}"
 BACKUP_STAGE="${BACKUP_STAGE:-$BACKUP_HOME/stage}"
 BACKUP_LOGS="${BACKUP_LOGS:-${HERMES_HOME:-$HOME/.hermes}/logs}"
+# Live directories backed up AS FILES alongside the stage: meeting
+# recordings + transcripts, sidebar artifacts, uploads, and the small
+# secrets outside the repo. Missing ones are skipped; extend with
+# BACKUP_EXTRA_PATHS (space-separated). Restore with
+# `restic restore latest --target / --path <dir>` — nothing to replay.
+bk_extra_paths() {
+  local d
+  for d in "${HOME}/.parley/captures" "${HOME}/.parley/docs" "${HOME}/.parley/uploads" \
+           "${HERMES_HOME:-$HOME/.hermes}/private" "${HERMES_HOME:-$HOME/.hermes}/vault" "${HERMES_HOME:-$HOME/.hermes}/apns" \
+           ${BACKUP_EXTRA_PATHS:-}; do
+    [[ -e "$d" ]] && echo "$d"
+  done
+}
 
 # Only a sqlite3 without the WAL-reset bug (https://sqlite.org/wal.html#walresetbug)
 # may open the LIVE databases: a vulnerable build can unlink the gateway's
