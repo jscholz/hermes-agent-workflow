@@ -1,65 +1,26 @@
 #!/usr/bin/env bash
-# Snapshot ~/.hermes/parley.db to parley-data/parley.sql.
-#
-# This is the Parley supplemental UI store: conversation_titles, pins,
-# push subscriptions/preferences, unread/activity state, VAPID keys, and the
-# UI-facing message rows. It is required for a host migration to reproduce the
-# Parley drawer and notification state exactly.
-#
-# Strategy: sqlite3 online .backup of the live WAL-backed DB, then .dump the
-# snapshot to plaintext SQL. parley-data/** is git-crypt encrypted.
+# Dump ~/.hermes/parley.db (pins, unread pointers, activity, push subs,
+# msg_links …) to the backup stage: ~/.backups/stage/parley-data/parley.sql
+# — one plain `.dump` from a `.backup` snapshot, WAL-safe sqlite3 only.
+# Stored by scripts/backup-nightly.sh (restic). Never committed to git.
+# Restore: scripts/restore-parley-db.sh (DUMP_DIR=... to override).
 set -euo pipefail
-
-export PATH="${HOME}/.local/sqlite-3.50.2/bin:${HOME}/miniconda3/bin:${PATH}"
-SQLITE3="$(command -v sqlite3 || true)"
-if [[ -z "${SQLITE3}" ]]; then
-  echo "[sync-parley-db] sqlite3 not found — install sqlite3 or provide ~/.local/sqlite-3.50.2/bin/sqlite3" >&2
-  exit 1
-fi
-
 REPO="${REPO:-$(cd "$(dirname "$0")/.." && pwd)}"
+. "${REPO}/scripts/lib/backup-common.sh"
+bk_active_host_or_exit "${REPO}" sync-parley-db
+SQLITE3="$(bk_sqlite3)"
 LIVE_DB="${HOME}/.hermes/parley.db"
 SNAPSHOT="/tmp/parley.db.snapshot.$$"
-OUT_DIR="${REPO}/parley-data"
-OUT_FILE="${OUT_DIR}/parley.sql"
-
-# Only the active host writes this dump. Both hosts dumping creates merge
-# conflicts and can resurrect stale Parley UI state.
-if [[ -f "${REPO}/ACTIVE_HOST" ]]; then
-  active_host=$(grep -E '^active_host=' "${REPO}/ACTIVE_HOST" | head -1 | cut -d= -f2-)
-  if [[ "${active_host}" != "$(hostname)" ]]; then
-    mkdir -p "${HOME}/.hermes/logs"
-    echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) standby (active=${active_host:-<unset>})" \
-      > "${HOME}/.hermes/logs/sync-parley-db.standby" 2>/dev/null || true
-    exit 0
-  fi
-fi
-
+OUT_DIR="${OUT_DIR:-${BACKUP_STAGE}/parley-data}"
 if [[ ! -f "${LIVE_DB}" ]]; then
   echo "[sync-parley-db] ${LIVE_DB} doesn't exist — skipping" >&2
   exit 0
 fi
-
-trap 'rm -f "${SNAPSHOT}" "${SNAPSHOT}.dump"' EXIT
-
+trap 'rm -f "${SNAPSHOT}"' EXIT
 "${SQLITE3}" "${LIVE_DB}" ".backup ${SNAPSHOT}"
 mkdir -p "${OUT_DIR}"
-"${SQLITE3}" "${SNAPSHOT}" ".dump" > "${OUT_FILE}"
-
-mkdir -p "${HOME}/.hermes/logs"
-date -u +%Y-%m-%dT%H:%M:%SZ > "${HOME}/.hermes/logs/sync-parley-db.heartbeat" 2>/dev/null || true
-
-cd "${REPO}"
-git add "${OUT_FILE}"
-
-if git diff --cached --quiet; then
-  exit 0
-fi
-
-bytes=$(stat -c %s "${OUT_FILE}")
-git commit -m "parley-db: snapshot $(date -u +%Y-%m-%dT%H:%MZ) (${bytes}b)" >/dev/null
-
-if ! git push origin main 2>/dev/null; then
-  echo "[sync-parley-db] push failed; will retry next cycle" >&2
-  exit 0
-fi
+"${SQLITE3}" "${SNAPSHOT}" ".dump" > "${OUT_DIR}/.parley.sql.tmp"
+mv "${OUT_DIR}/.parley.sql.tmp" "${OUT_DIR}/parley.sql"
+rm -rf "${OUT_DIR}/parley.sql.parts"   # 80 MB split layout from the git-based version
+bk_heartbeat sync-parley-db
+echo "[sync-parley-db] $(date -u +%FT%TZ) staged $(du -h "${OUT_DIR}/parley.sql" | cut -f1) at ${OUT_DIR}"

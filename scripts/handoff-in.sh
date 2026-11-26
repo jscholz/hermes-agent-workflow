@@ -15,7 +15,9 @@
 #   2. Verify ACTIVE_HOST status — empty (normal handoff) or matches
 #      this host (idempotent re-run). Refuse otherwise unless --force.
 #   3. Stop local services so destructive restores cannot race writers.
-#   4. (Default yes) restore-hermes-state.sh --yes to replay sessions/messages.
+#   4. restic restore of the latest nightly snapshot into ~/.backups/stage
+#      (local repo, else BACKUP_CLOUD_REPO), then (default yes)
+#      restore-hermes-state.sh --yes to replay sessions/messages.
 #   5. (Default yes) restore-parley-db.sh --yes to replay Parley titles,
 #      pins, push subscriptions, unread/activity state, and UI message rows.
 #   6. (Default yes) restore-hindsight-bank.sh --yes to replay the latest
@@ -109,8 +111,29 @@ done
 # hindsight-server here. restore-hindsight-bank.sh will start it if needed.
 
 # --- 4. Restore Hermes state (default yes) ------------------------------
+# Data comes from restic, not from the repo: pull the latest nightly
+# snapshot into ~/.backups/stage (absolute paths, same on every host).
+# Local repo first; the cloud repo when this host has none.
+STAGE="${BACKUP_STAGE:-$HOME/.backups/stage}"
+if (( RESTORE_HERMES || RESTORE_PARLEY || RESTORE_HINDSIGHT )); then
+  export RESTIC_PASSWORD_FILE="${HOME}/.backups/restic.key" RESTIC_CACHE_DIR="${HOME}/.backups/cache"
+  export RCLONE_CONFIG="${REPO}/backups/rclone.conf" PATH="${HOME}/.local/bin:${HOME}/.backups/bin:${PATH}"
+  mkdir -p "${HOME}/.backups"
+  [[ -s "${RESTIC_PASSWORD_FILE}" ]] || cp "${REPO}/backups/restic.key" "${RESTIC_PASSWORD_FILE}" 2>/dev/null || true
+  cloud_repo="${BACKUP_CLOUD_REPO:-$(awk -F= '$1=="BACKUP_CLOUD_REPO"{print substr($0,length($1)+2)}' "${HOME}/.hermes/.env" 2>/dev/null | tail -1)}"
+  src="${HOME}/.backups/restic"
+  restic -r "${src}" cat config >/dev/null 2>&1 || src="${cloud_repo}"
+  if [[ -n "${src}" ]]; then
+    say "restoring latest nightly snapshot from ${src} → ${STAGE}..."
+    rm -rf "${STAGE}"
+    restic -r "${src}" restore latest --tag nightly --target / --path "${STAGE}" >/dev/null \
+      || warn "restic restore from ${src} failed — continuing without data (docs/BACKUPS.md)"
+  else
+    warn "no restic repo on this host and BACKUP_CLOUD_REPO unset — nothing to restore from"
+  fi
+fi
 if (( RESTORE_HERMES )); then
-  if [[ -f "${REPO}/hermes-data/schema.sql" ]]; then
+  if [[ -f "${STAGE}/hermes-data/schema.sql" ]]; then
     say "restoring Hermes sessions/messages from hermes-data/..."
     if (( ASSUME_YES )); then
       "${REPO}/scripts/restore-hermes-state.sh" --yes
@@ -118,7 +141,7 @@ if (( RESTORE_HERMES )); then
       "${REPO}/scripts/restore-hermes-state.sh"
     fi
   else
-    warn "no hermes-data/schema.sql — skipping Hermes state restore (fresh install or git-crypt locked?)"
+    warn "no ${STAGE}/hermes-data/schema.sql — skipping Hermes state restore (no snapshot restored)"
   fi
 else
   say "skipping Hermes state restore"
@@ -126,7 +149,7 @@ fi
 
 # --- 5. Restore Parley supplemental DB (default yes) ------------------
 if (( RESTORE_PARLEY )); then
-  if [[ -f "${REPO}/parley-data/parley.sql" ]]; then
+  if [[ -f "${STAGE}/parley-data/parley.sql" ]]; then
     say "restoring Parley supplemental DB from parley-data/parley.sql..."
     if (( ASSUME_YES )); then
       "${REPO}/scripts/restore-parley-db.sh" --yes
@@ -134,7 +157,7 @@ if (( RESTORE_PARLEY )); then
       "${REPO}/scripts/restore-parley-db.sh"
     fi
   else
-    warn "no parley-data/parley.sql — skipping Parley DB restore (fresh install or git-crypt locked?)"
+    warn "no ${STAGE}/parley-data/parley.sql — skipping Parley DB restore (no snapshot restored)"
   fi
 else
   say "skipping Parley supplemental DB restore"
@@ -142,7 +165,7 @@ fi
 
 # --- 6. Restore hindsight bank (default yes) ----------------------------
 if (( RESTORE_HINDSIGHT )); then
-  if [[ -d "${REPO}/hindsight-data" ]] && find "${REPO}/hindsight-data" -mindepth 1 -name '*.sql' -print -quit | grep -q .; then
+  if [[ -d "${STAGE}/hindsight-data" ]] && find "${STAGE}/hindsight-data" -mindepth 1 -name '*.sql' -print -quit | grep -q .; then
     say "restoring Hindsight bank from hindsight-data snapshot..."
     if (( ASSUME_YES )); then
       "${REPO}/scripts/restore-hindsight-bank.sh" --yes
@@ -150,7 +173,7 @@ if (( RESTORE_HINDSIGHT )); then
       "${REPO}/scripts/restore-hindsight-bank.sh"
     fi
   else
-    warn "no hindsight-data/*.sql — skipping Hindsight restore (fresh install or git-crypt locked?)"
+    warn "no ${STAGE}/hindsight-data/*.sql — skipping Hindsight restore (no snapshot restored)"
   fi
 else
   say "skipping Hindsight bank restore"
@@ -199,9 +222,7 @@ mkdir -p "${HOME}/.hermes/logs"
 add_cron "doctor.sh"                  "*/10 * * * * ${REPO}/scripts/doctor.sh >> ${HOME}/.hermes/logs/doctor.log 2>&1"
 add_cron "sync-hermes.sh"             "*/15 * * * * ${REPO}/scripts/sync-hermes.sh >> ${HOME}/.hermes/logs/sync-hermes.log 2>&1"
 add_cron "sync-cc-history.sh"         "*/15 * * * * ${REPO}/scripts/sync-cc-history.sh >> ${HOME}/.hermes/logs/sync-cc-history.log 2>&1"
-add_cron "sync-hermes-state.sh"       "44 3 * * * ${REPO}/scripts/sync-hermes-state.sh >> ${HOME}/.hermes/logs/sync-hermes-state.log 2>&1"
-add_cron "sync-parley-db.sh"        "49 3 * * * ${REPO}/scripts/sync-parley-db.sh >> ${HOME}/.hermes/logs/sync-parley-db.log 2>&1"
-add_cron "sync-hindsight-bank.sh"     "33 3 * * * ${REPO}/scripts/sync-hindsight-bank.sh >> ${HOME}/.hermes/logs/sync-hindsight-bank.log 2>&1"
+add_cron "backup-nightly.sh"          "33 3 * * * ${REPO}/scripts/backup-nightly.sh >> ${HOME}/.hermes/logs/backup-nightly.log 2>&1"
 add_cron "prune-claude-cc-history.sh" "44 4 * * * ${REPO}/scripts/prune-claude-cc-history.sh >> ${HOME}/.hermes/logs/prune-claude-cc-history.log 2>&1"
 
 say "enabling + starting services on ${HOSTNAME}..."

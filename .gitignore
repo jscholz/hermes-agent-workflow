@@ -57,3 +57,9 @@ plugins/parley
 *.swp
 *~
 scripts/__pycache__/
+
+# Database dumps live in restic (~/.backups), never here (docs/BACKUPS.md)
+/hindsight-data/
+/hermes-data/
+/parley-data/
+/sidekick-data/

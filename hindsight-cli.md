@@ -189,6 +189,6 @@ the query string).
 ## See also
 
 - `~/.hermes/hindsight/config.json` — mode, reranker, budget, prefetch_method
-- `scripts/sync-hindsight-bank.sh` — daily pg_dump (in this repo)
+- `scripts/sync-hindsight-bank.sh` — nightly per-table dump into the restic stage (run by `scripts/backup-nightly.sh`; `docs/BACKUPS.md`)
 - Hindsight upstream: https://github.com/zeroclaw-labs/hindsight (public)
 - The slim variant we run: hindsight-api-slim (torchless, RRF reranker)

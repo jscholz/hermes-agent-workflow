@@ -1,0 +1,9 @@
+# Nightly restic backup of ~/.hermes/state.db, the hindsight bank and
+# ~/.hermes/parley.db (scripts/backup-nightly.sh, docs/BACKUPS.md).
+# Local repo ~/.backups/restic always; copy to BACKUP_CLOUD_REPO (from
+# ~/.hermes/.env) when set. Only the ACTIVE_HOST runs it.
+#
+# bootstrap.sh / install-versioning-crons.sh install this for you; to add
+# it by hand replace REPO_PATH with your absolute clone path:
+#
+# 33 3 * * * REPO=REPO_PATH REPO_PATH/scripts/backup-nightly.sh >> ~/.hermes/logs/backup-nightly.log 2>&1

@@ -66,9 +66,9 @@ Google account.
 - `doctor.sh` every 10 minutes
 - `sync-hermes.sh` every 15 minutes for session exports and systemd unit snapshots
 - `sync-cc-history.sh` every 15 minutes for Claude Code memory
-- `sync-hermes-state.sh` daily for `~/.hermes/state.db`
-- `sync-hindsight-bank.sh` daily for Hindsight Postgres
-- `sync-parley-db.sh` daily for Parley UI state
+- `backup-nightly.sh` nightly: `~/.hermes/state.db`, the Hindsight
+  Postgres bank and Parley UI state into restic (local + `BACKUP_CLOUD_REPO`),
+  never into git — `docs/BACKUPS.md`
 - `prune-claude-cc-history.sh` daily
 
 The script refuses to install these crons while `origin` is the public
@@ -85,7 +85,7 @@ In a promoted repo, git-crypt encrypts:
 - `hosts/**` except the public example host
 - `sessions/**`
 - `cron/jobs.json` and `cron/output/**`
-- `hermes-data/**`, `hindsight-data/**`, `parley-data/**`
+- `backups/**` (restic key + cloud token; the dumps live in restic, not git)
 
 The placeholder `.gitkeep` and README files that make the public template
 legible remain plaintext.

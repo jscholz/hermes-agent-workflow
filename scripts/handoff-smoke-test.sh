@@ -55,7 +55,7 @@ if [[ -L "${HERMES}/scripts" ]]; then
 else
   warn "missing linked ${HERMES}/scripts"
 fi
-for pattern in doctor.sh sync-hermes.sh sync-cc-history.sh sync-hermes-state.sh sync-parley-db.sh sync-hindsight-bank.sh prune-claude-cc-history.sh; do
+for pattern in doctor.sh sync-hermes.sh sync-cc-history.sh backup-nightly.sh prune-claude-cc-history.sh; do
   if crontab -l 2>/dev/null | grep -qF "${pattern}"; then
     ok "OS cron installed: ${pattern}"
   else

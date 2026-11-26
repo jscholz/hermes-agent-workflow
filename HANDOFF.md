@@ -18,9 +18,10 @@ scripts/handoff-out.sh
 
 That stops user-facing services, captures final dumps for:
 
-- `~/.hermes/state.db` to `hermes-data/state.sql`
-- `~/.hermes/parley.db` to `parley-data/parley.sql`
-- Hindsight Postgres to `hindsight-data/**`
+- `~/.hermes/state.db`, `~/.hermes/parley.db` and the Hindsight Postgres
+  bank into a restic snapshot (`scripts/backup-nightly.sh`: local repo +
+  `BACKUP_CLOUD_REPO`), which `handoff-in.sh` restores on the new host —
+  see `docs/BACKUPS.md`
 
 It then clears `ACTIVE_HOST`, commits, and pushes.
 

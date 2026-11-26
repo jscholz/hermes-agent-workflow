@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Restore the hindsight memory bank from the encrypted per-table dumps
-# in hindsight-data/. Used during fresh-machine recovery (after git
+# in the backup stage (~/.backups/stage/hindsight-data, restored by restic;
+# DUMP_DIR=… to override). Used during fresh-machine recovery (after git
 # clone + git-crypt unlock) and as the catch-up step in a multi-host
 # handoff (handoff-in pulls the dumps committed by the previous active host).
 #
@@ -42,7 +43,7 @@ PGUSER="${PGUSER:-hindsight}"
 PGDATABASE="${PGDATABASE:-hindsight}"
 export PGPASSWORD="${PGPASSWORD:-hindsight}"
 
-DUMP_DIR="${REPO}/hindsight-data"
+DUMP_DIR="${DUMP_DIR:-${BACKUP_STAGE:-$HOME/.backups/stage}/hindsight-data}"
 
 confirm=""
 if [[ "${1:-}" != "--yes" ]]; then
@@ -58,7 +59,7 @@ if [[ "${1:-}" != "--yes" ]]; then
 fi
 
 if [[ ! -d "${DUMP_DIR}" ]]; then
-  echo "no dump dir at ${DUMP_DIR} — has the repo been cloned + git-crypt unlocked?" >&2
+  echo "no dump dir at ${DUMP_DIR} — restore the stage first: restic restore latest --target / (docs/BACKUPS.md)" >&2
   exit 1
 fi
 

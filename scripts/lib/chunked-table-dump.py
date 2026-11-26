@@ -151,7 +151,8 @@ def _copy_footer() -> bytes:
     return b"\\.\n"
 
 
-def _dump_full_table(args: argparse.Namespace, columns: list[str]) -> list[bytes]:
+def _dump_full_table(args: argparse.Namespace, columns: list[str],
+                     order_cols: list[str] | None = None) -> list[bytes]:
     """Dump table rows as COPY text data, ordered by the chunking key.
 
     COPY text escapes tabs, newlines, and backslashes in field data, so
@@ -160,7 +161,7 @@ def _dump_full_table(args: argparse.Namespace, columns: list[str]) -> list[bytes
     """
     table_expr = _qualified_table_expr(args.table)
     select_cols = ", ".join(_quote_ident(c) for c in columns)
-    order_expr = _quote_ident(args.pk_column)
+    order_expr = ", ".join(_quote_ident(c) for c in (order_cols or [args.pk_column]))
     sql = f"COPY (SELECT {select_cols} FROM {table_expr} ORDER BY {order_expr}) TO STDOUT"
     cmd = [
         _psql_path(args),
@@ -303,7 +304,7 @@ def main() -> int:
     ap.add_argument("--psql-user", required=True)
     ap.add_argument("--psql-database", required=True)
     ap.add_argument("--table", required=True, help="e.g. public.memory_units")
-    ap.add_argument("--pk-column", required=True, help="primary-key column name")
+    ap.add_argument("--pk-column", default="", help="primary-key column name (chunked mode)")
     ap.add_argument(
         "--exclude-columns",
         default="",
@@ -311,7 +312,22 @@ def main() -> int:
         "'embedding'). Reconstituted on restore. May not include the "
         "pk column.",
     )
-    ap.add_argument("--out-dir", required=True, type=Path)
+    ap.add_argument("--out-dir", type=Path, help="chunked layout output dir (pk-range chunks)")
+    ap.add_argument(
+        "--flat-file",
+        type=Path,
+        help="write ONE COPY file ordered by --order-by instead of the chunked "
+        "layout. For a content-addressed store (restic) chunking "
+        "buys nothing; what matters is that rows ARRIVE at the end, so order by "
+        "insertion time first.",
+    )
+    ap.add_argument(
+        "--order-by",
+        default="",
+        help="comma-separated ORDER BY columns for --flat-file (default: every "
+        "dumped column, so the file is deterministic even without a key). Put "
+        "the insertion-time column first so new rows append.",
+    )
     ap.add_argument(
         "--target-bytes",
         type=int,
@@ -335,11 +351,25 @@ def main() -> int:
         c.strip() for c in args.exclude_columns.split(",") if c.strip()
     ]
 
+    if args.flat_file is None and args.out_dir is None:
+        print("[chunked-dump] ERROR: one of --out-dir / --flat-file is required", file=sys.stderr)
+        return 2
+    cols = _columns_list(args)
+    if args.flat_file is not None:
+        order_cols = [c.strip() for c in args.order_by.split(",") if c.strip()] or list(cols)
+        missing = [c for c in order_cols if c not in cols]
+        if missing:
+            print(f"[chunked-dump] ERROR: --order-by columns {missing} not in {cols}", file=sys.stderr)
+            return 2
+        rows = _dump_full_table(args, cols, order_cols)
+        args.flat_file.parent.mkdir(parents=True, exist_ok=True)
+        size = _write_chunk_atomic(args.flat_file, rows, _copy_header(args, cols), _copy_footer())
+        print(f"[chunked-dump] {args.table}: {len(rows)} rows -> {args.flat_file} ({size} bytes, order {','.join(order_cols)})")
+        return 0
     out_dir: Path = args.out_dir
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # 1. Dump the table to a flat sorted COPY-data row list.
-    cols = _columns_list(args)
     try:
         pk_col_idx = cols.index(args.pk_column)
     except ValueError:

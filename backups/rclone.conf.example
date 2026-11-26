@@ -1,0 +1,24 @@
+# rclone remote for the restic cloud copy (scripts/backup-nightly.sh with
+# BACKUP_CLOUD_REPO=rclone:gdrive:hermes-backups/restic). Copy to
+# backups/rclone.conf (git-crypt'd by backups/**) and fill in.
+#
+# Google Drive via your own OAuth client (Google Cloud console → APIs &
+# Services → Credentials → OAuth client ID, type "Desktop app"; put the
+# consent screen in production, or the refresh token expires in 7 days).
+# scope drive.file: rclone sees only the files it created.
+#
+# token: run ONCE on a machine with a browser and paste the printed JSON:
+#   rclone authorize "drive" "<client_id>" "<client_secret>" --drive-scope drive.file
+# or, from a headless host, through an ssh tunnel from your laptop:
+#   ssh -L 53682:127.0.0.1:53682 <host>
+#   rclone authorize "drive" --auth-no-open-browser "<client_id>" "<client_secret>" --drive-scope drive.file
+#   (open the printed URL in the laptop's browser; the redirect lands via the tunnel)
+#
+# Other backends need no rclone at all: sftp:user@host:/path, s3:…, b2:…
+# are native restic repo strings (https://restic.readthedocs.io/en/stable/030_preparing_a_new_repo.html).
+[gdrive]
+type = drive
+client_id = YOUR_CLIENT_ID.apps.googleusercontent.com
+client_secret = YOUR_CLIENT_SECRET
+scope = drive.file
+token =

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Restore ~/.hermes/parley.db from parley-data/parley.sql.
+# Restore ~/.hermes/parley.db from the backup stage (~/.backups/stage/parley-data/parley.sql,
+# restored by restic; DUMP_DIR=… to override).
 #
 # DESTRUCTIVE: replaces ${HOME}/.hermes/parley.db. Requires Hermes gateway
 # and Parley proxy/audio services to be stopped because they read/write this
@@ -7,7 +8,8 @@
 set -euo pipefail
 
 REPO="${REPO:-$(cd "$(dirname "$0")/.." && pwd)}"
-DUMP="${REPO}/parley-data/parley.sql"
+DUMP_DIR="${DUMP_DIR:-${BACKUP_STAGE:-$HOME/.backups/stage}/parley-data}"
+DUMP="${DUMP_DIR}/parley.sql"
 LIVE_DB="${HOME}/.hermes/parley.db"
 ASSUME_YES=0
 
@@ -34,7 +36,7 @@ say()  { printf '→ %s\n' "$*"; }
 
 if [[ ! -f "${DUMP}" ]]; then
   die "no dump at ${DUMP}.
-     Run scripts/sync-parley-db.sh on the previous active host first
+     Restore the stage first: restic restore latest --target / (docs/BACKUPS.md),
      (or unlock git-crypt: git-crypt unlock <key>)."
 fi
 

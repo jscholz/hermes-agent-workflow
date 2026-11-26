@@ -44,23 +44,14 @@ cron/jobs.json                         filter=git-crypt diff=git-crypt
 cron/output/**                         filter=git-crypt diff=git-crypt
 cron/output/.gitkeep                   -filter -diff
 
-# === Hindsight bank dump ===
-# pg_dump output written by scripts/sync-hindsight-bank.sh on a daily
-# cron. Encrypted because the bank contains everything the agent has
-# learned about its user — names, addresses, schedule, private context.
-hindsight-data/**                      filter=git-crypt diff=git-crypt
-hindsight-data/.gitkeep                -filter -diff
-
-# === Hermes sqlite state dump ===
-# Contains sessions/messages from ~/.hermes/state.db as SQL.
-hermes-data/**                         filter=git-crypt diff=git-crypt
-hermes-data/.gitkeep                   -filter -diff
-
-# === Parley supplemental UI DB dump ===
-# Contains conversation titles, pins, push subscriptions/preferences,
-# unread/activity state, VAPID keys, and Parley-facing message rows.
-parley-data/**                       filter=git-crypt diff=git-crypt
-parley-data/.gitkeep                 -filter -diff
+# === Backup secrets ===
+# The DATA (state.db, hindsight bank, parley.db dumps) lives in restic
+# repos (~/.backups/restic + BACKUP_CLOUD_REPO), never in this repo — see
+# docs/BACKUPS.md. Only the restic repo key and the rclone OAuth token
+# travel here, encrypted.
+backups/**                             filter=git-crypt diff=git-crypt
+backups/.gitkeep                       -filter -diff
+backups/rclone.conf.example            -filter -diff
 
 # === Private workspace project data ===
 # Project-specific live/raw data for the agent's per-user tools. Curated

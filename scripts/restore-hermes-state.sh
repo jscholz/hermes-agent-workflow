@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Restore ~/.hermes/state.db from the chunked dump under hermes-data/.
+# Restore ~/.hermes/state.db from the chunked dump in the backup stage
+# (~/.backups/stage/hermes-data, restored by restic; DUMP_DIR=… to override).
 #
 # Use case: bringing up a host as the new active. Replays sessions +
 # messages from the active-host's last sync. FTS indexes are rebuilt
@@ -24,12 +25,12 @@
 set -euo pipefail
 
 REPO="${REPO:-$(cd "$(dirname "$0")/.." && pwd)}"
-DUMP_DIR="${REPO}/hermes-data"
+DUMP_DIR="${DUMP_DIR:-${BACKUP_STAGE:-$HOME/.backups/stage}/hermes-data}"
 LIVE_DB="${HOME}/.hermes/state.db"
 ASSUME_YES=0
 
 export PATH="${HOME}/.local/sqlite-3.50.2/bin:${HOME}/miniconda3/bin:/opt/homebrew/bin:/usr/local/bin:${PATH}"
-SQLITE3="$(command -v sqlite3 || true)"
+SQLITE3="${HOME}/.local/bin/sqlite3"; [[ -x "${SQLITE3}" ]] || SQLITE3="$(command -v sqlite3 || true)"   # WAL-safe build first (docs/BACKUPS.md)
 if [[ -z "${SQLITE3}" ]]; then
   echo "[restore-hermes-state] sqlite3 not found — install sqlite3 or add it to PATH" >&2
   exit 1
@@ -54,7 +55,7 @@ say()  { printf '→ %s\n' "$*"; }
 # --- Pre-flight ---------------------------------------------------------
 if [[ ! -f "${DUMP_DIR}/schema.sql" ]]; then
   die "no schema dump at ${DUMP_DIR}/schema.sql.
-     Run scripts/sync-hermes-state.sh on the previous active host first
+     Restore the stage first: restic restore latest --target / (docs/BACKUPS.md),
      (or unlock git-crypt: git-crypt unlock <key>)."
 fi
 

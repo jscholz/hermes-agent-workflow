@@ -233,8 +233,8 @@ Tell the user, **literally**:
 > that encrypts everything matched by `.gitattributes` (`.env`,
 > `auth.json`, `google_*.json`, `gogcli/**`, `whatsapp/session/**`,
 > `pairing/**`, `memories/**`, `hosts/**`, `sessions/**`,
-> `cron/jobs.json`, `cron/output/**`, `hindsight-data/**`,
-> `hermes-data/**`, `parley-data/**`).
+> `cron/jobs.json`, `cron/output/**`, `backups/**`; the database dumps
+> themselves live in restic, not git — `docs/BACKUPS.md`).
 >
 > **LOSING THIS KEY MEANS YOUR ENCRYPTED HISTORY IS UNRECOVERABLE.**
 >
@@ -477,21 +477,21 @@ daily dumps in §6.
 
 Re-ask:
 
-> Want to turn on daily encrypted state dumps now?
+> The nightly backup (`scripts/backup-nightly.sh`, installed by
+> bootstrap) snapshots state.db, the hindsight bank and parley.db into
+> a restic repo at ~/.backups/restic. Do you want an off-host copy too?
 >
-> Trade-off: you get a rebuild-on-fresh-host story; the cost is two
-> encrypted commits per day pushed to your fork (~50KB-1MB churn on
-> a steady week). Off by default; opt in once you've tested git-crypt
-> push works.
+> Set `BACKUP_CLOUD_REPO` in ~/.hermes/.env to any restic target:
+> Google Drive through rclone (`rclone:gdrive:hermes-backups/restic`,
+> token via `backups/rclone.conf`, see `backups/rclone.conf.example`),
+> `sftp:user@host:/path`, `s3:…`, `b2:…`. Without it the backup is local
+> only and the nightly log says so.
 
-If yes: walk the user through `crontab -e` and have them paste
-the lines from `cron/sync-hermes-state.cron.example` and
-`cron/sync-parley-db.cron.example` and
-`cron/sync-hindsight-bank.cron.example` (substituting `REPO_PATH`
-for the absolute path of their fork). Parley's dump is required
-to preserve custom session titles, pins, push subscriptions,
-unread/activity state, and UI-facing message rows during host
-migration.
+Nothing is committed to git either way — the dumps live in restic
+(`docs/BACKUPS.md`). Parley's dump is what preserves custom session
+titles, pins, push subscriptions, unread/activity state and UI-facing
+message rows across a host migration. Finish by running
+`scripts/restore-test.sh` once so the user has seen a restore pass.
 
 ## Section 12 — Final summary
 

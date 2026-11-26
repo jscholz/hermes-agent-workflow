@@ -239,6 +239,7 @@ prompt_default PARLEY_TLS_DIR "Parley fallback HTTPS cert/key directory" "${PARL
 prompt_default HERMES_HOME    "hermes home directory" "${HERMES_HOME_DEFAULT}"
 prompt_default AGENT_LAT      "agent latitude (for ambient weather widget, optional)" ""
 prompt_default AGENT_LON      "agent longitude (for ambient weather widget, optional)" ""
+prompt_default BACKUP_CLOUD_REPO "restic cloud repo for the nightly backup copy (optional; e.g. rclone:gdrive:hermes-backups/restic, sftp:host:/path — see docs/BACKUPS.md)" ""
 
 # Make sure HERMES_HOME exists before we look in it for an existing .env.
 mkdir -p "${HERMES_HOME}"
@@ -1040,6 +1041,7 @@ write_env OPENROUTER_API_KEY  "${OPENROUTER_API_KEY:-}"
 write_env TAVILY_API_KEY      "${TAVILY_API_KEY:-}"
 [[ -n "${AGENT_LAT}" ]] && write_env AGENT_LAT "${AGENT_LAT}"
 [[ -n "${AGENT_LON}" ]] && write_env AGENT_LON "${AGENT_LON}"
+[[ -n "${BACKUP_CLOUD_REPO}" ]] && write_env BACKUP_CLOUD_REPO "${BACKUP_CLOUD_REPO}"
 
 OPENAI_KEY_FOR_DEFAULTS="${OPENAI_API_KEY:-}"
 [[ "${OPENAI_KEY_FOR_DEFAULTS}" == "__KEEP__" ]] && OPENAI_KEY_FOR_DEFAULTS="$(env_value OPENAI_API_KEY)"
@@ -1129,6 +1131,73 @@ fi
 #     a single active session is multiple MB).
 # More crons (e.g. periodic doctor.sh, sync jobs) can be added by the
 # user as needed — this is the conservative starter set.
+section "Backups"
+# Nightly restic backup of state.db, the hindsight bank and parley.db
+# (docs/BACKUPS.md). Pinned static binaries, verified against the release
+# checksums; idempotent. The repo key is generated once and committed
+# git-crypt'd (backups/restic.key) so a fresh clone can restore.
+RESTIC_VERSION="0.20.0"
+RCLONE_VERSION="1.76.0"
+BACKUP_HOME="${HOME}/.backups"
+mkdir -p "${BACKUP_HOME}/bin" "${BACKUP_HOME}/cache" "${HOME}/.local/bin"
+install_backup_tool() {
+  # install_backup_tool <name> <version> <asset-url> <sums-url> <asset-basename> <extract-cmd>
+  local name="$1" version="$2" asset_url="$3" sums_url="$4" asset="$5" extract="$6"
+  if "${BACKUP_HOME}/bin/${name}" version 2>/dev/null | grep -q "${version}"; then
+    ok "${name} ${version} already installed"
+  else
+    local tmp; tmp="$(mktemp -d)"
+    ( cd "${tmp}" && curl -fsSLO "${asset_url}" && curl -fsSLo SHA256SUMS "${sums_url}" \
+      && grep " ${asset}\$" SHA256SUMS | sha256sum -c - >/dev/null \
+      && eval "${extract}" && install -m 0755 "${name}" "${BACKUP_HOME}/bin/${name}" ) \
+      || fail "${name} ${version}: download or checksum failed (${asset_url})"
+    rm -rf "${tmp}"
+    ok "installed ${name} ${version} → ${BACKUP_HOME}/bin/${name}"
+  fi
+  ln -sfn "${BACKUP_HOME}/bin/${name}" "${HOME}/.local/bin/${name}"
+}
+case "$(uname -s)-$(uname -m)" in
+  Linux-x86_64)
+    install_backup_tool restic "${RESTIC_VERSION}" \
+      "https://github.com/restic/restic/releases/download/v${RESTIC_VERSION}/restic_${RESTIC_VERSION}_linux_amd64.bz2" \
+      "https://github.com/restic/restic/releases/download/v${RESTIC_VERSION}/SHA256SUMS" \
+      "restic_${RESTIC_VERSION}_linux_amd64.bz2" \
+      "bunzip2 -f restic_${RESTIC_VERSION}_linux_amd64.bz2 && mv restic_${RESTIC_VERSION}_linux_amd64 restic"
+    install_backup_tool rclone "${RCLONE_VERSION}" \
+      "https://github.com/rclone/rclone/releases/download/v${RCLONE_VERSION}/rclone-v${RCLONE_VERSION}-linux-amd64.zip" \
+      "https://github.com/rclone/rclone/releases/download/v${RCLONE_VERSION}/SHA256SUMS" \
+      "rclone-v${RCLONE_VERSION}-linux-amd64.zip" \
+      "python3 -c \"import zipfile; zipfile.ZipFile('rclone-v${RCLONE_VERSION}-linux-amd64.zip').extract('rclone-v${RCLONE_VERSION}-linux-amd64/rclone')\" && mv rclone-v${RCLONE_VERSION}-linux-amd64/rclone rclone"
+    ;;
+  *) warn "no pinned restic/rclone build for $(uname -s)-$(uname -m) — install both yourself (docs/BACKUPS.md)" ;;
+esac
+mkdir -p "${REPO}/backups"
+if [[ ! -s "${REPO}/backups/restic.key" ]]; then
+  if git -C "${REPO}" check-attr filter backups/restic.key | grep -q git-crypt; then
+    openssl rand -base64 32 > "${REPO}/backups/restic.key"; chmod 600 "${REPO}/backups/restic.key"
+    ok "generated backups/restic.key (git-crypt'd; losing it loses every backup)"
+  else
+    warn "backups/** is not git-crypt'd in .gitattributes — not generating a key into the repo; create ${BACKUP_HOME}/restic.key by hand"
+  fi
+fi
+if [[ -s "${REPO}/backups/restic.key" ]]; then
+  cp -n "${REPO}/backups/restic.key" "${BACKUP_HOME}/restic.key" 2>/dev/null || true; chmod 600 "${BACKUP_HOME}/restic.key"
+fi
+# Fresh host with no data yet but an existing restic repo (local or cloud):
+# pull the latest nightly snapshot into the stage so the restore scripts
+# have something to replay (handoff-in.sh does the same).
+if [[ -s "${BACKUP_HOME}/restic.key" && ! -d "${BACKUP_HOME}/stage" ]]; then
+  export RESTIC_PASSWORD_FILE="${BACKUP_HOME}/restic.key" RCLONE_CONFIG="${REPO}/backups/rclone.conf"
+  bk_src="${BACKUP_HOME}/restic"
+  "${BACKUP_HOME}/bin/restic" -r "${bk_src}" cat config >/dev/null 2>&1 || bk_src="$(env_value BACKUP_CLOUD_REPO)"
+  if [[ -n "${bk_src}" ]] && "${BACKUP_HOME}/bin/restic" -r "${bk_src}" snapshots --tag nightly --latest 1 >/dev/null 2>&1; then
+    info "restoring latest nightly snapshot from ${bk_src} → ${BACKUP_HOME}/stage"
+    "${BACKUP_HOME}/bin/restic" -r "${bk_src}" restore latest --tag nightly --target / --path "${BACKUP_HOME}/stage" >/dev/null \
+      && ok "stage restored — replay with scripts/restore-hermes-state.sh / restore-hindsight-bank.sh / restore-parley-db.sh" \
+      || warn "restic restore from ${bk_src} failed — nothing restored"
+  fi
+fi
+
 section "Cron"
 
 add_cron() {
@@ -1148,6 +1217,8 @@ mkdir -p "${HERMES_HOME}/logs"
 if command -v crontab >/dev/null 2>&1; then
   add_cron "prune-claude-cc-history.sh" \
     "44 4 * * * ${REPO}/scripts/prune-claude-cc-history.sh >> ${HERMES_HOME}/logs/prune-claude-cc-history.log 2>&1"
+  add_cron "backup-nightly.sh" \
+    "33 3 * * * REPO=${REPO} HERMES_HOME=${HERMES_HOME} ${REPO}/scripts/backup-nightly.sh >> ${HERMES_HOME}/logs/backup-nightly.log 2>&1"
 else
   warn "crontab not on PATH — skipping cron install (run scripts/prune-claude-cc-history.sh manually as needed)"
 fi

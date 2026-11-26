@@ -14,13 +14,12 @@
 #   2. Stop hermes services (gateway, dashboard, hindsight-server) and
 #      any parley units that exist (parley, parley-audio,
 #      whatsapp-bridge).
-#   3. Run sync-hindsight-bank.sh to capture the final dump (BEFORE
+#   3. Run backup-nightly.sh for the final restic snapshot (BEFORE
 #      hindsight-server stops so pg0 is still alive — wait, hindsight
 #      is already stopped, so we'd want to start, dump, stop. Tricky.
 #      Approach: stop OTHER services first, dump while hindsight is
 #      still up, then stop hindsight).
-#   4. Run sync-hermes-state.sh for the final SQLite sessions/messages dump.
-#   5. Run sync-parley-db.sh for Parley UI/session metadata.
+#      (one run also dumps the SQLite sessions/messages and Parley UI DB).
 #   6. Run sync-hermes.sh to commit any repo-backed drift.
 #   7. Update ACTIVE_HOST to "no host active" with a transition note.
 #   8. git add ACTIVE_HOST; git commit; git push.
@@ -86,21 +85,12 @@ done
 # Capture final SQLite state after user-facing writers are stopped. The
 # online-backup path is safe while live, but doing it after gateway/Parley
 # stop gives the handoff a crisp "no more messages after this point" boundary.
-say "capturing final Hermes SQLite state..."
-"${REPO}/scripts/sync-hermes-state.sh" || warn "sync-hermes-state.sh non-zero — proceeding anyway"
-
-say "capturing final Parley supplemental DB..."
-"${REPO}/scripts/sync-parley-db.sh" || warn "sync-parley-db.sh non-zero — proceeding anyway"
-
-# Run a final hindsight dump while pg0 is still up (hindsight-server hasn't
-# been stopped yet). The sync script will exit cleanly if hindsight-server
-# isn't active.
-say "capturing final hindsight dump..."
-if systemctl --user is-active --quiet hindsight-server.service; then
-  "${REPO}/scripts/sync-hindsight-bank.sh" || warn "sync-hindsight-bank.sh non-zero — proceeding anyway"
-else
-  warn "hindsight-server not active — skipping final dump (last dump in repo may be stale)"
-fi
+# One backup run: dumps all three (hindsight-server is still up at this
+# point; the dump script exits cleanly if it is not), snapshots them into
+# the local restic repo and copies to BACKUP_CLOUD_REPO — which is what the
+# incoming host restores from (handoff-in.sh). See docs/BACKUPS.md.
+say "taking the final backup (restic local + cloud)..."
+"${REPO}/scripts/backup-nightly.sh" || warn "backup-nightly.sh non-zero — the incoming host may restore a stale snapshot"
 
 # Now stop + disable hindsight (last because pg0 is embedded).
 if systemctl --user is-active --quiet hindsight-server.service; then

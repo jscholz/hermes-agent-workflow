@@ -104,6 +104,31 @@ check_service() {
     ISSUES+=("service not enabled for user boot: ${name}")
   fi
 }
+# ── Backups (scripts/backup-nightly.sh, docs/BACKUPS.md) ─────────────
+# The status file is written at the end of every run, failed ones too.
+# A missing cloud repo is deliberately NOT an issue here (doctor runs every
+# 10 min); backup-nightly.sh says so in its own log each night.
+BACKUP_STATUS="${HERMES}/logs/backup-nightly.status.json"
+if [[ -f "${BACKUP_STATUS}" ]]; then
+  backup_issue="$(python3 - "${BACKUP_STATUS}" <<'PY'
+import json, sys, datetime as dt
+d = json.load(open(sys.argv[1]))
+ts = dt.datetime.fromisoformat(d["ts"].replace("Z", "+00:00"))
+age_h = (dt.datetime.now(dt.timezone.utc) - ts).total_seconds() / 3600
+bad = [k[5:] for k, v in d.items() if k.startswith("dump_") and v != "ok"]
+if age_h > 30: print(f"backups: last run {age_h:.0f}h ago (nightly cron not running?)")
+elif not d.get("ok"): print("backups: last run FAILED" + (f" (dumps: {bad})" if bad else "") + " — see logs/backup-nightly.log")
+elif d.get("cloud_repo") and d.get("cloud_configured") and not d.get("cloud_ok"): print(f"backups: cloud copy to {d['cloud_repo']} failed on the last run")
+elif d.get("check_ok") is False: print("backups: last restic integrity check FAILED")
+prev, now = d.get("prev_local_repo_bytes"), d.get("local_repo_bytes")
+if prev and now and now - prev > 2_000_000_000: print(f"backups: local repo grew {(now-prev)/1e9:.1f} GB in one run — dumps no longer dedup?")
+PY
+)"
+  while IFS= read -r line; do [[ -n "${line}" ]] && ISSUES+=("${line}"); done <<<"${backup_issue}"
+elif crontab -l 2>/dev/null | grep -q backup-nightly.sh; then
+  ISSUES+=("backups: cron installed but no status file yet at ${BACKUP_STATUS} (first run pending, or it never ran)")
+fi
+
 check_service hermes-gateway
 check_service hermes-dashboard
 check_service hindsight-server

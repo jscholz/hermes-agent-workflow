@@ -64,9 +64,7 @@ listed here is **not** in your backup. The columns:
 | `whatsapp/session/**`                 | `~/.hermes/whatsapp/session/`         | **yes**   | shared   | Baileys session credentials. Losing these means QR-rescan from the phone. |
 | `pairing/**`                          | `~/.hermes/pairing/`                  | **yes**   | shared   | Parley PWA pairing tokens. |
 | `sessions/**`                         | (export target from Hermes CLI)       | **yes**   | shared   | Exported Hermes session transcripts from `scripts/sync-hermes.sh`. |
-| `hindsight-data/<table>.sql` + `hindsight-data/<bulk-table>/NNNN.sql` | (restore target: hindsight Postgres)  | **yes**   | shared   | Daily per-table `pg_dump` of the hindsight memory bank. Bulk tables (memory_units, memory_links) are byte-rotated into NNNN.sql chunks ≤ 80 MB each so the dump fits under GitHub's 100 MB per-blob cap; small tables stay single files. See §5. |
-| `hermes-data/schema.sql` + `hermes-data/<table>.sql` + `hermes-data/messages/NNNN.sql` | (restore target: `~/.hermes/state.db`) | **yes**  | shared   | Daily sqlite dump of `state.db` (sessions, messages, schema_version, state_meta). `messages` is byte-rotated into NNNN.sql chunks (see scripts/lib/chunked-sqlite-dump.py); small tables stay single files. See §5. |
-| `parley-data/parley.sql`          | (restore target: `~/.hermes/parley.db`) | **yes** | shared | Daily sqlite dump of Parley supplemental UI state: custom titles, pins, push subscriptions/preferences, unread/activity state, VAPID keys, and UI-facing message rows. See §5. |
+| `backups/restic.key`, `backups/rclone.conf` | `~/.backups/restic.key` (copied) | **yes** | shared | restic repo key + cloud token for the nightly database backup. The dumps themselves live in restic repos, never here — see §5 and `docs/BACKUPS.md`. |
 | `hosts/<host>/claude-code-memory/`    | `~/.claude/projects/<proj>/memory/`   | **yes**   | per-host | Per-host Claude Code memory dir, including `RESUME.md`. |
 | `hosts/<host>/claude-code-history/`   | (snapshotted from `~/.claude/projects/<proj>/*.jsonl`) | **yes** | per-host | Compressed Claude Code session transcripts. Pruned on a cron. |
 | `ACTIVE_HOST`                         | (sentinel — not symlinked)            | no        | shared   | Which host is the current writer (see §7). |
@@ -179,24 +177,21 @@ OAuth tokens, WhatsApp session). The model:
 
 | Asset                    | How it's captured           | Where it lands           | Cron                              | Restore script |
 | ------------------------ | --------------------------- | ------------------------ | --------------------------------- | -------------- |
-| Hindsight Postgres DB    | per-table `pg_dump` + byte-rotated chunks for the bulk tables (see scripts/lib/chunked-table-dump.py) | `hindsight-data/<table>.sql` + `hindsight-data/<bulk>/NNNN.sql` (encrypted) | `cron/sync-hindsight-bank.cron.example` | `scripts/restore-hindsight-bank.sh` |
-| `~/.hermes/state.db`     | `.backup` (atomic) → schema dump + per-table data dumps, with `messages` byte-rotated into chunks (see scripts/lib/chunked-sqlite-dump.py) | `hermes-data/schema.sql` + `hermes-data/<table>.sql` + `hermes-data/messages/NNNN.sql` (encrypted) | `cron/sync-hermes-state.cron.example` | `scripts/restore-hermes-state.sh` |
-| `~/.hermes/parley.db`  | `.backup` (atomic) → `.dump` | `parley-data/parley.sql` (encrypted) | `cron/sync-parley-db.cron.example` | `scripts/restore-parley-db.sh` |
+| Hindsight Postgres DB    | one `COPY (… ORDER BY insertion time)` file per table (scripts/lib/chunked-table-dump.py `--flat-file`) | `~/.backups/stage/hindsight-data/` → restic | `scripts/backup-nightly.sh` 03:33 | `scripts/restore-hindsight-bank.sh` |
+| `~/.hermes/state.db`     | `.backup` (atomic) → schema dump + per-table data dumps, `messages` in id-range chunks (scripts/lib/chunked-sqlite-dump.py) | `~/.backups/stage/hermes-data/` → restic | same run | `scripts/restore-hermes-state.sh` |
+| `~/.hermes/parley.db`  | `.backup` (atomic) → `.dump` | `~/.backups/stage/parley-data/` → restic | same run | `scripts/restore-parley-db.sh` |
 | Live secrets             | symlinked into repo         | `.env`, `auth.json`, etc. (encrypted) | (instant — every git push) | git pull |
 
-Daily-dump crons are **off by default**. Opt in by:
-
-1. Confirming you've initialized git-crypt (you can't push
-   meaningful encrypted backups without it).
-2. Confirming `git push` from cron actually works (SSH agent
-   forwarding or a deploy key — cron is non-interactive).
-3. Editing `cron/*.cron.example`, replacing `REPO_PATH` with your
-   absolute clone path, and adding the line via `crontab -e`.
-
-The chunked dump layout keeps the encrypted history small on its
-own: frozen chunks stay byte-identical across runs, so git's
-pack-delta collapses each daily snapshot to roughly the size of the
-rows that actually changed. No history rewriting is needed.
+The nightly run (`scripts/backup-nightly.sh`, installed by `bootstrap.sh`
+/ `install-versioning-crons.sh`, active host only) snapshots the stage into
+a **restic** repo at `~/.backups/restic` and copies it to
+`BACKUP_CLOUD_REPO` (any restic backend — rclone/Google Drive, SFTP, S3,
+B2) when that is set in `~/.hermes/.env`. Retention 14 daily / 8 weekly /
+12 monthly / 3 yearly; integrity check weekly; `doctor.sh` reports a
+stale, failed or ballooning backup. Dumps are **never committed to git**:
+encrypted blobs don't delta or compress, so a git-based nightly dump stores
+the whole thing again every night. Details and the restore procedure:
+`docs/BACKUPS.md`; moving an older fork: `docs/MIGRATE-BACKUPS.md`.
 
 **Restore on a fresh machine** is a single sequence:
 
@@ -204,10 +199,11 @@ rows that actually changed. No history rewriting is needed.
 git clone <your-fork>
 cd <your-fork>
 echo '<base64-key>' | base64 -d | git-crypt unlock -
-./scripts/bootstrap.sh        # rebuilds the symlink tree
+./scripts/bootstrap.sh        # rebuilds the symlink tree, installs restic, restores the
+                              # latest snapshot into ~/.backups/stage (local repo or BACKUP_CLOUD_REPO)
 ./scripts/restore-hermes-state.sh --yes   # applies schema + replays data chunks
 ./scripts/restore-parley-db.sh --yes    # replays parley.sql
-./scripts/restore-hindsight-bank.sh       # cats per-table + chunked .sql into psql
+./scripts/restore-hindsight-bank.sh       # cats per-table .sql into psql
 ```
 
 `bootstrap.sh` writes a sentinel at `~/.hermes/.bootstrap.complete`
@@ -220,12 +216,13 @@ so re-runs and Claude-driven installs can detect prior state.
 By design, several things are excluded from your fork:
 
 - **Live `~/.hermes/state.db`** — too big, written every turn,
-  derivable from the `hermes-data/` dumps plus replay. The dump
+  derivable from the nightly restic snapshot plus replay. The dump
   captures the conversation tables; FTS5 indexes are rebuilt by
   `restore-hermes-state.sh`.
 - **Live `~/.hermes/parley.db`** — written by the Parley/Hermes
-  UI adapter. It is restored from `parley-data/parley.sql`; do not
+  UI adapter. It is restored from the snapshot's `parley.sql`; do not
   symlink the live DB because SQLite WAL writers need a local file.
+- **The database dumps themselves** — restic, not git (§5).
 - **`~/.hermes/cache/` and `~/.hermes/logs/`** — derivable.
 - **`~/.hermes/kanban.db`, `~/.hermes/response_store.db`** —
   per-host scratch state. Restore would be wrong, not just
@@ -255,8 +252,8 @@ single line:
 active_host=<hostname>
 ```
 
-Sync scripts (`sync-hermes-state.sh`, `sync-hindsight-bank.sh`)
-and `sync-parley-db.sh` **refuse to run on any host where `$(hostname)` doesn't match**.
+The backup (`backup-nightly.sh` and the dump scripts it calls)
+**refuses to run on any host where `$(hostname)` doesn't match**.
 This prevents two machines from racing on the same backup branch
 and producing merge conflicts in encrypted blobs (which are
 miserable to resolve).
